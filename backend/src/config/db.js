@@ -6,6 +6,13 @@ const connectDB = async () => {
     process.exit(1);
   }
 
+  // Safety guard: Prevent connecting to localhost/127.0.0.1 in production
+  if (process.env.NODE_ENV === 'production' && 
+     (process.env.MONGODB_URI.includes('localhost') || process.env.MONGODB_URI.includes('127.0.0.1'))) {
+    console.error('❌ Database Connection Error: Cannot connect to localhost/127.0.0.1 database in production mode.');
+    process.exit(1);
+  }
+
   const options = {
     maxPoolSize: 50,
     serverSelectionTimeoutMS: 5000,
