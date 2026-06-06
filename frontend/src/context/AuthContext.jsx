@@ -4,18 +4,31 @@ import { authService } from '../services/api';
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState({
-    _id: 'mock-owner-id',
-    name: 'Balaji Owner',
-    phone: '9876543210',
-    role: 'owner',
-  });
-  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const checkAuth = async () => {
-    // Auto-bypass: keep loading false and user set
-    setLoading(false);
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      const data = await authService.getMe();
+      if (data.success) {
+        setUser(data.user);
+      } else {
+        localStorage.removeItem('token');
+        setUser(null);
+      }
+    } catch (err) {
+      localStorage.removeItem('token');
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -23,11 +36,28 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (phone, password) => {
-    return { success: true };
+    try {
+      setLoading(true);
+
+      const data = await authService.login(phone, password);
+
+      localStorage.setItem('token', data.token);
+      setUser(data.user);
+
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        message: err.response?.data?.message || 'Login failed'
+      };
+    } finally {
+      setLoading(false);
+    }
   };
 
   const logout = () => {
-    // Auto-bypass: disable logout
+    localStorage.removeItem('token');
+    setUser(null);
   };
 
   const changePassword = async (oldPassword, newPassword) => {
