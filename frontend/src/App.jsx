@@ -5,7 +5,6 @@ import Login from './components/Auth/Login';
 import Dashboard from './components/Dashboard/Dashboard';
 import MilkCollection from './components/MilkCollection/MilkCollection';
 import Suppliers from './components/Suppliers/Suppliers';
-import RateChart from './components/RateChart/RateChart';
 import Payments from './components/Payments/Payments';
 import Reports from './components/Reports/Reports';
 import Settings from './components/Settings/Settings';
@@ -47,8 +46,6 @@ const MainApp = () => {
         return <MilkCollection />;
       case 'suppliers':
         return <Suppliers />;
-      case 'rate-chart':
-        return <RateChart />;
       case 'payments':
         return <Payments />;
       case 'reports':

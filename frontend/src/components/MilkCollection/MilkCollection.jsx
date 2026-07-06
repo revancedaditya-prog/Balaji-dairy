@@ -21,8 +21,6 @@ const MilkCollection = () => {
   const [quantity, setQuantity] = useState('');
   const [fat, setFat] = useState('');
   const [snf, setSnf] = useState('');
-  const [rate, setRate] = useState('');
-  const [amount, setAmount] = useState('');
   const [remarks, setRemarks] = useState('');
 
   // Time & Shift Detect
@@ -66,30 +64,6 @@ const MilkCollection = () => {
     return () => clearInterval(timer);
   }, [customDateTime]);
 
-  // Auto rate lookup when FAT and SNF are entered
-  useEffect(() => {
-    const lookupRateValue = async () => {
-      const fatVal = parseFloat(fat);
-      const snfVal = parseFloat(snf);
-      if (!isNaN(fatVal) && fatVal > 0 && !isNaN(snfVal) && snfVal > 0) {
-        try {
-          const res = await rateChartService.lookupRate(fatVal, snfVal);
-          if (res.success && res.rate > 0) {
-            setRate(res.rate.toString());
-            const qty = parseFloat(quantity) || 0;
-            setAmount((Math.round(qty * res.rate * 100) / 100).toString());
-            setFormError('');
-          }
-        } catch (err) {
-          // Rate not found in chart, clear auto-calculated fields
-          setRate('');
-          setAmount('');
-        }
-      }
-    };
-    lookupRateValue();
-  }, [fat, snf]);
-
   // Lookup Supplier Name when code is entered
   const lookupSupplier = async (code) => {
     if (!code) {
@@ -113,32 +87,8 @@ const MilkCollection = () => {
     lookupSupplier(supplierCode);
   };
 
-  // Helper to recompute rate and amount based on changes
   const handleQuantityChange = (qtyVal) => {
     setQuantity(qtyVal);
-    const qty = parseFloat(qtyVal) || 0;
-    const r = parseFloat(rate) || 0;
-    if (qty && r) {
-      setAmount(Math.round(qty * r * 100) / 100);
-    }
-  };
-
-  const handleRateChange = (rateVal) => {
-    setRate(rateVal);
-    const r = parseFloat(rateVal) || 0;
-    const qty = parseFloat(quantity) || 0;
-    if (qty && r) {
-      setAmount(Math.round(qty * r * 100) / 100);
-    }
-  };
-
-  const handleAmountChange = (amtVal) => {
-    setAmount(amtVal);
-    const amt = parseFloat(amtVal) || 0;
-    const qty = parseFloat(quantity) || 0;
-    if (qty > 0 && amt) {
-      setRate(Math.round((amt / qty) * 100) / 100);
-    }
   };
 
   // Load collection logs
@@ -176,13 +126,8 @@ const MilkCollection = () => {
     setFormError('');
     setFormSuccess('');
 
-    if (!supplierCode || !supplierName || !quantity || !fat || !snf) {
+    if (!supplierCode || !supplierName || !quantity) {
       setFormError('Please fill in all required collection fields');
-      return;
-    }
-
-    if (!rate || parseFloat(rate) <= 0) {
-      setFormError('Cannot save entry. Rate must be greater than 0.');
       return;
     }
 
@@ -190,24 +135,20 @@ const MilkCollection = () => {
       const res = await milkEntryService.addEntry({
         supplierCode: parseInt(supplierCode, 10),
         milkQuantity: parseFloat(quantity),
-        fat: parseFloat(fat),
-        snf: parseFloat(snf),
+        fat: fat ? parseFloat(fat) : 0,
+        snf: snf ? parseFloat(snf) : 0,
         date: entryDate,
         time: entryTime,
         shift,
-        rate: parseFloat(rate),
-        amount: parseFloat(amount),
         remarks,
       });
 
       if (res.success) {
-        setFormSuccess(`Entry logged for #${supplierCode} - Qty: ${quantity}L, Amt: ₹${amount}`);
+        setFormSuccess(`Entry logged for #${supplierCode} - Qty: ${quantity}L`);
         // Reset form except Code to facilitate quick consecutive entries for next supplier
         setQuantity('');
         setFat('');
         setSnf('');
-        setRate('');
-        setAmount('');
         setRemarks('');
         loadEntries();
       }
@@ -242,8 +183,6 @@ const MilkCollection = () => {
       'Milk Liters': e.milkQuantity,
       'Fat %': e.fat,
       'SNF %': e.snf,
-      'Rate (Rs)': e.rate,
-      'Amount (Rs)': e.amount,
       'Remarks': e.remarks || '-'
     }));
 
@@ -257,7 +196,6 @@ const MilkCollection = () => {
   // PDF Export using Browser Print Page formatting
   const exportToPDF = () => {
     const totalQty = entries.reduce((sum, e) => sum + e.milkQuantity, 0);
-    const totalAmt = entries.reduce((sum, e) => sum + e.amount, 0);
 
     const printContent = `
       <html>
@@ -287,8 +225,6 @@ const MilkCollection = () => {
                 <th>Qty (L)</th>
                 <th>FAT (%)</th>
                 <th>SNF (%)</th>
-                <th>Rate (₹)</th>
-                <th>Amount (₹)</th>
               </tr>
             </thead>
             <tbody>
@@ -301,20 +237,14 @@ const MilkCollection = () => {
                   <td>${e.milkQuantity} L</td>
                   <td>${e.fat}%</td>
                   <td>${e.snf}%</td>
-                  <td>₹${e.rate}</td>
-                  <td>₹${e.amount}</td>
                 </tr>
               `).join('')}
               <tr class="total-row">
                 <td colspan="4">TOTAL SUMMARY</td>
                 <td>${Math.round(totalQty * 100) / 100} L</td>
-                <td colspan="3">-</td>
-                <td>₹${Math.round(totalAmt * 100) / 100}</td>
+                <td colspan="2">-</td>
               </tr>
             </tbody>
-          </table>
-        </body>
-      </html>
     `;
 
     const printWindow = window.open('', '_blank');
@@ -446,7 +376,7 @@ const MilkCollection = () => {
 
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
               <div style={{ flex: 1 }}>
-                <label className="form-label">FAT (%)*</label>
+                <label className="form-label">FAT (%)</label>
                 <input
                   type="number"
                   step="0.1"
@@ -454,11 +384,10 @@ const MilkCollection = () => {
                   placeholder="e.g. 6.5"
                   value={fat}
                   onChange={(e) => setFat(e.target.value)}
-                  required
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label className="form-label">SNF (%)*</label>
+                <label className="form-label">SNF (%)</label>
                 <input
                   type="number"
                   step="0.1"
@@ -466,33 +395,6 @@ const MilkCollection = () => {
                   placeholder="e.g. 9.2"
                   value={snf}
                   onChange={(e) => setSnf(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Manual Rate & Amount Entry */}
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-              <div style={{ flex: 1 }}>
-                <label className="form-label">Rate (₹/L)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="form-control"
-                  placeholder="Rate/L (Auto-filled)"
-                  value={rate}
-                  onChange={(e) => handleRateChange(e.target.value)}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="form-label">Total Amount (₹)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="form-control"
-                  placeholder="Total Amount"
-                  value={amount}
-                  onChange={(e) => handleAmountChange(e.target.value)}
                 />
               </div>
             </div>
@@ -611,8 +513,6 @@ const MilkCollection = () => {
                     <th>Shift</th>
                     <th>Qty</th>
                     <th>FAT/SNF</th>
-                    <th>Rate</th>
-                    <th>Amount</th>
                     <th style={{ textAlign: 'right' }}>Action</th>
                   </tr>
                 </thead>
@@ -639,8 +539,6 @@ const MilkCollection = () => {
                         </td>
                         <td>{e.milkQuantity} L</td>
                         <td>{e.fat}% / {e.snf}%</td>
-                        <td>₹{e.rate}</td>
-                        <td style={{ fontWeight: '600' }}>₹{e.amount}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button
                             className="btn btn-danger"

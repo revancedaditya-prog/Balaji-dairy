@@ -47,8 +47,8 @@ exports.addEntry = async (req, res) => {
   let { date, time, shift, rate } = req.body;
 
   try {
-    if (!supplierCode || !milkQuantity || fat === undefined || snf === undefined) {
-      return res.status(400).json({ success: false, message: 'Please provide supplierCode, milkQuantity, fat, and snf' });
+    if (!supplierCode || !milkQuantity) {
+      return res.status(400).json({ success: false, message: 'Please provide supplierCode and milkQuantity' });
     }
 
     // Auto fetch supplier details
@@ -71,21 +71,12 @@ exports.addEntry = async (req, res) => {
       shift = detectShift(time);
     }
 
-    // Determine rate from chart if not manually forced
-    if (rate === undefined || rate === null || rate === 0) {
-      rate = await getRate(fat, snf);
-      if (rate === 0) {
-        return res.status(400).json({
-          success: false,
-          message: `Rate not defined in chart for Fat: ${fat}, SNF: ${snf}. Please set rate in Rate Chart first.`,
-        });
-      }
-    }
-
-    // Calculate amount (prefer manually passed amount if provided)
-    const amount = req.body.amount !== undefined && req.body.amount !== null && req.body.amount !== 0
+    const fFat = fat !== undefined && fat !== null ? parseFloat(fat) : 0;
+    const fSnf = snf !== undefined && snf !== null ? parseFloat(snf) : 0;
+    const fRate = rate !== undefined && rate !== null ? parseFloat(rate) : 0;
+    const fAmount = req.body.amount !== undefined && req.body.amount !== null
       ? parseFloat(req.body.amount)
-      : Math.round(milkQuantity * rate * 100) / 100;
+      : Math.round(milkQuantity * fRate * 100) / 100;
 
     const newEntry = await MilkEntry.create({
       supplierCode,
@@ -94,10 +85,10 @@ exports.addEntry = async (req, res) => {
       time,
       shift,
       milkQuantity,
-      fat,
-      snf,
-      rate,
-      amount,
+      fat: fFat,
+      snf: fSnf,
+      rate: fRate,
+      amount: fAmount,
       remarks,
       createdBy: req.user._id,
     });
@@ -234,26 +225,11 @@ exports.updateEntry = async (req, res) => {
     if (shift) entry.shift = shift;
     if (remarks !== undefined) entry.remarks = remarks;
 
-    // Recompute rate & amount if quantity, fat or snf changes
-    if (milkQuantity !== undefined) entry.milkQuantity = milkQuantity;
-    if (fat !== undefined) entry.fat = fat;
-    if (snf !== undefined) entry.snf = snf;
-
-    // Recalculate rate
-    if (fat !== undefined || snf !== undefined) {
-      if (rate === undefined || rate === null || rate === 0) {
-        rate = await getRate(entry.fat, entry.snf);
-        if (rate === 0) {
-          return res.status(400).json({
-            success: false,
-            message: `Rate not defined in chart for Fat: ${entry.fat}, SNF: ${entry.snf}.`,
-          });
-        }
-      }
-      entry.rate = rate;
-    } else if (rate !== undefined) {
-      entry.rate = rate;
-    }
+    // Update fields
+    if (milkQuantity !== undefined) entry.milkQuantity = parseFloat(milkQuantity);
+    if (fat !== undefined) entry.fat = parseFloat(fat);
+    if (snf !== undefined) entry.snf = parseFloat(snf);
+    if (rate !== undefined) entry.rate = parseFloat(rate);
 
     entry.amount = req.body.amount !== undefined && req.body.amount !== null
       ? parseFloat(req.body.amount)

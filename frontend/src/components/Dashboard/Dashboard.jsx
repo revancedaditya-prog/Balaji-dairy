@@ -83,7 +83,7 @@ const Dashboard = () => {
       {error && <div className="error-alert">{error}</div>}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4">
+      <div className="grid grid-cols-3">
         <div className="card kpi-card">
           <div className="kpi-icon supplier-icon">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -104,16 +104,6 @@ const Dashboard = () => {
             <span className="kpi-subtext">
               M: {stats.morningMilk}L | E: {stats.eveningMilk}L
             </span>
-          </div>
-        </div>
-
-        <div className="card kpi-card">
-          <div className="kpi-icon payment-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/><circle cx="18" cy="15" r="2"/></svg>
-          </div>
-          <div className="kpi-content">
-            <span className="kpi-label">Today's Payment</span>
-            <span className="kpi-value">₹{stats.todayAmount.toLocaleString('en-IN')}</span>
           </div>
         </div>
 
@@ -190,8 +180,6 @@ const Dashboard = () => {
                 <th>Shift</th>
                 <th>Quantity</th>
                 <th>Fat / SNF</th>
-                <th>Rate</th>
-                <th>Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -208,13 +196,11 @@ const Dashboard = () => {
                     </td>
                     <td>{entry.milkQuantity} L</td>
                     <td>{entry.fat}% / {entry.snf}%</td>
-                    <td>₹{entry.rate}</td>
-                    <td style={{ fontWeight: '600', color: 'var(--primary)' }}>₹{entry.amount}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-light)', padding: '2rem' }}>
+                  <td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-light)', padding: '2rem' }}>
                     No milk collection records found.
                   </td>
                 </tr>

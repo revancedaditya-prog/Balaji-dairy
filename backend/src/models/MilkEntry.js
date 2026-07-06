@@ -32,19 +32,19 @@ const MilkEntrySchema = new mongoose.Schema(
     },
     fat: {
       type: Number,
-      required: [true, 'Fat is required'],
+      default: 0,
     },
     snf: {
       type: Number,
-      required: [true, 'SNF is required'],
+      default: 0,
     },
     rate: {
       type: Number,
-      required: [true, 'Rate is required'],
+      default: 0,
     },
     amount: {
       type: Number,
-      required: [true, 'Amount is required'],
+      default: 0,
     },
     remarks: {
       type: String,

@@ -65,7 +65,6 @@ const Reports = () => {
 
   // Aggregate stats from report data
   const totalMilk = reportData.reduce((sum, item) => sum + item.totalMilk, 0);
-  const totalAmount = reportData.reduce((sum, item) => sum + item.totalAmount, 0);
   // Weighted Averages
   const weightedFatSum = reportData.reduce((sum, item) => sum + (item.avgFat * item.totalMilk), 0);
   const weightedSnfSum = reportData.reduce((sum, item) => sum + (item.avgSnf * item.totalMilk), 0);
@@ -76,15 +75,15 @@ const Reports = () => {
   const getHeaders = () => {
     switch (reportType) {
       case 'shift-wise':
-        return ['Date', 'Shift', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
+        return ['Date', 'Shift', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'No. Entries'];
       case 'supplier-wise':
-        return ['Code', 'Supplier Name', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
+        return ['Code', 'Supplier Name', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'No. Entries'];
       case 'village-wise':
-        return ['Village', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
+        return ['Village', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'No. Entries'];
       case 'monthly':
-        return ['Month (YYYY-MM)', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
+        return ['Month (YYYY-MM)', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'No. Entries'];
       case 'yearly':
-        return ['Year', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
+        return ['Year', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'No. Entries'];
       default:
         return [];
     }
@@ -95,7 +94,6 @@ const Reports = () => {
       `${item.totalMilk.toFixed(2)} L`,
       `${item.avgFat.toFixed(2)}%`,
       `${item.avgSnf.toFixed(2)}%`,
-      `₹${item.totalAmount.toFixed(2)}`,
       item.entryCount
     ];
 
@@ -159,7 +157,6 @@ const Reports = () => {
             <div class="kpi-item">Total Milk Volume<div class="kpi-val">${totalMilk.toFixed(2)} L</div></div>
             <div class="kpi-item">Weighted Avg FAT<div class="kpi-val">${avgFat.toFixed(2)}%</div></div>
             <div class="kpi-item">Weighted Avg SNF<div class="kpi-val">${avgSnf.toFixed(2)}%</div></div>
-            <div class="kpi-item">Total Valuation<div class="kpi-val">₹${totalAmount.toFixed(2)}</div></div>
           </div>
           <table>
             <thead>
@@ -286,7 +283,7 @@ const Reports = () => {
           {error && <div className="error-alert" style={{ marginBottom: '1rem' }}>{error}</div>}
 
           {/* Aggregates Dashboard Row */}
-          <div className="card grid grid-cols-4" style={{ padding: '1rem', marginBottom: '1rem', border: '1px solid var(--accent)' }}>
+          <div className="card grid grid-cols-3" style={{ padding: '1rem', marginBottom: '1rem', border: '1px solid var(--accent)' }}>
             <div style={{ textAlign: 'center' }}>
               <span className="text-muted" style={{ fontSize: '0.75rem' }}>Total Milk</span>
               <h4 style={{ color: 'var(--primary)', fontSize: '1.25rem', marginTop: '0.25rem' }}>{totalMilk.toFixed(2)} L</h4>
@@ -298,10 +295,6 @@ const Reports = () => {
             <div style={{ textAlign: 'center' }}>
               <span className="text-muted" style={{ fontSize: '0.75rem' }}>Weighted SNF</span>
               <h4 style={{ color: 'var(--text-main)', fontSize: '1.25rem', marginTop: '0.25rem' }}>{avgSnf.toFixed(2)}%</h4>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <span className="text-muted" style={{ fontSize: '0.75rem' }}>Total Valuation</span>
-              <h4 style={{ color: 'var(--secondary)', fontSize: '1.25rem', marginTop: '0.25rem' }}>₹{totalAmount.toFixed(2)}</h4>
             </div>
           </div>
 
