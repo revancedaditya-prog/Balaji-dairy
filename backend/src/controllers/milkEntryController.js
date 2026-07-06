@@ -47,8 +47,8 @@ exports.addEntry = async (req, res) => {
   let { date, time, shift, rate } = req.body;
 
   try {
-    if (!supplierCode || !milkQuantity) {
-      return res.status(400).json({ success: false, message: 'Please provide supplierCode and milkQuantity' });
+    if (!supplierCode || !milkQuantity || req.body.amount === undefined || req.body.amount === null) {
+      return res.status(400).json({ success: false, message: 'Please provide supplierCode, milkQuantity, and total amount' });
     }
 
     // Auto fetch supplier details
@@ -73,10 +73,8 @@ exports.addEntry = async (req, res) => {
 
     const fFat = fat !== undefined && fat !== null ? parseFloat(fat) : 0;
     const fSnf = snf !== undefined && snf !== null ? parseFloat(snf) : 0;
-    const fRate = rate !== undefined && rate !== null ? parseFloat(rate) : 0;
-    const fAmount = req.body.amount !== undefined && req.body.amount !== null
-      ? parseFloat(req.body.amount)
-      : Math.round(milkQuantity * fRate * 100) / 100;
+    const fAmount = parseFloat(req.body.amount);
+    const fRate = Math.round((fAmount / milkQuantity) * 100) / 100;
 
     const newEntry = await MilkEntry.create({
       supplierCode,
@@ -229,11 +227,12 @@ exports.updateEntry = async (req, res) => {
     if (milkQuantity !== undefined) entry.milkQuantity = parseFloat(milkQuantity);
     if (fat !== undefined) entry.fat = parseFloat(fat);
     if (snf !== undefined) entry.snf = parseFloat(snf);
-    if (rate !== undefined) entry.rate = parseFloat(rate);
+    if (req.body.amount !== undefined && req.body.amount !== null) {
+      entry.amount = parseFloat(req.body.amount);
+    }
 
-    entry.amount = req.body.amount !== undefined && req.body.amount !== null
-      ? parseFloat(req.body.amount)
-      : Math.round(entry.milkQuantity * entry.rate * 100) / 100;
+    // Recalculate rate based on updated amount and quantity
+    entry.rate = Math.round((entry.amount / entry.milkQuantity) * 100) / 100;
 
     const updatedEntry = await entry.save();
 

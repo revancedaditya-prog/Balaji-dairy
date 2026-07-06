@@ -44,7 +44,7 @@ const MilkEntrySchema = new mongoose.Schema(
     },
     amount: {
       type: Number,
-      default: 0,
+      required: [true, 'Amount is required'],
     },
     remarks: {
       type: String,

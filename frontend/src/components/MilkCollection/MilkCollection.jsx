@@ -21,6 +21,7 @@ const MilkCollection = () => {
   const [quantity, setQuantity] = useState('');
   const [fat, setFat] = useState('');
   const [snf, setSnf] = useState('');
+  const [amount, setAmount] = useState('');
   const [remarks, setRemarks] = useState('');
 
   // Time & Shift Detect
@@ -126,8 +127,8 @@ const MilkCollection = () => {
     setFormError('');
     setFormSuccess('');
 
-    if (!supplierCode || !supplierName || !quantity) {
-      setFormError('Please fill in all required collection fields');
+    if (!supplierCode || !supplierName || !quantity || !amount) {
+      setFormError('Please fill in Supplier Code, Quantity and Amount');
       return;
     }
 
@@ -140,15 +141,17 @@ const MilkCollection = () => {
         date: entryDate,
         time: entryTime,
         shift,
+        amount: parseFloat(amount),
         remarks,
       });
 
       if (res.success) {
-        setFormSuccess(`Entry logged for #${supplierCode} - Qty: ${quantity}L`);
+        setFormSuccess(`Entry logged for #${supplierCode} - Qty: ${quantity}L, Amt: ₹${amount}`);
         // Reset form except Code to facilitate quick consecutive entries for next supplier
         setQuantity('');
         setFat('');
         setSnf('');
+        setAmount('');
         setRemarks('');
         loadEntries();
       }
@@ -183,6 +186,7 @@ const MilkCollection = () => {
       'Milk Liters': e.milkQuantity,
       'Fat %': e.fat,
       'SNF %': e.snf,
+      'Amount (Rs)': e.amount,
       'Remarks': e.remarks || '-'
     }));
 
@@ -196,6 +200,7 @@ const MilkCollection = () => {
   // PDF Export using Browser Print Page formatting
   const exportToPDF = () => {
     const totalQty = entries.reduce((sum, e) => sum + e.milkQuantity, 0);
+    const totalAmt = entries.reduce((sum, e) => sum + e.amount, 0);
 
     const printContent = `
       <html>
@@ -225,6 +230,7 @@ const MilkCollection = () => {
                 <th>Qty (L)</th>
                 <th>FAT (%)</th>
                 <th>SNF (%)</th>
+                <th>Amount (₹)</th>
               </tr>
             </thead>
             <tbody>
@@ -237,14 +243,19 @@ const MilkCollection = () => {
                   <td>${e.milkQuantity} L</td>
                   <td>${e.fat}%</td>
                   <td>${e.snf}%</td>
+                  <td>₹${e.amount}</td>
                 </tr>
               `).join('')}
               <tr class="total-row">
                 <td colspan="4">TOTAL SUMMARY</td>
                 <td>${Math.round(totalQty * 100) / 100} L</td>
                 <td colspan="2">-</td>
+                <td>₹${Math.round(totalAmt * 100) / 100}</td>
               </tr>
             </tbody>
+          </table>
+        </body>
+      </html>
     `;
 
     const printWindow = window.open('', '_blank');
@@ -400,6 +411,19 @@ const MilkCollection = () => {
             </div>
 
             <div className="form-group">
+              <label className="form-label">Total Amount (₹)*</label>
+              <input
+                type="number"
+                step="0.01"
+                className="form-control"
+                placeholder="Total Amount in ₹"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group">
               <label className="form-label">Remarks</label>
               <input
                 type="text"
@@ -513,6 +537,7 @@ const MilkCollection = () => {
                     <th>Shift</th>
                     <th>Qty</th>
                     <th>FAT/SNF</th>
+                    <th>Amount</th>
                     <th style={{ textAlign: 'right' }}>Action</th>
                   </tr>
                 </thead>
@@ -539,6 +564,7 @@ const MilkCollection = () => {
                         </td>
                         <td>{e.milkQuantity} L</td>
                         <td>{e.fat}% / {e.snf}%</td>
+                        <td style={{ fontWeight: '600' }}>₹{e.amount}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button
                             className="btn btn-danger"
@@ -552,7 +578,7 @@ const MilkCollection = () => {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-light)', padding: '2rem' }}>
+                      <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-light)', padding: '2rem' }}>
                         No milk collection records match the filter query.
                       </td>
                     </tr>
