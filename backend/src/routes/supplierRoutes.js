@@ -9,23 +9,23 @@ const {
   deleteSupplier,
   bulkUploadSuppliers,
 } = require('../controllers/supplierController');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, authorize } = require('../middleware/authMiddleware');
 
 router.use(protect); // Guard all routes
 
 router.route('/')
-  .post(addSupplier)
+  .post(authorize('owner', 'manager'), addSupplier)
   .get(getSuppliers);
 
 router.route('/bulk')
-  .post(bulkUploadSuppliers);
+  .post(authorize('owner', 'manager'), bulkUploadSuppliers);
 
 router.route('/code/:code')
   .get(getSupplierByCode);
 
 router.route('/:id')
   .get(getSupplierById)
-  .put(updateSupplier)
-  .delete(deleteSupplier);
+  .put(authorize('owner', 'manager'), updateSupplier)
+  .delete(authorize('owner', 'manager'), deleteSupplier);
 
 module.exports = router;

@@ -491,3 +491,22 @@
     font-size: 0.75rem;
   }
 }
+
+/* User Role Badges */
+.badge-owner {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid rgba(30, 64, 175, 0.15);
+}
+
+.badge-manager {
+  background-color: var(--secondary-light);
+  color: var(--secondary);
+  border: 1px solid rgba(21, 128, 61, 0.15);
+}
+
+.badge-worker {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}

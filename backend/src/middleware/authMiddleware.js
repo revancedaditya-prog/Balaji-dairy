@@ -2,17 +2,6 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
 const protect = async (req, res, next) => {
-  // Auto-bypass login: inject default owner user
-  try {
-    const owner = await User.findOne({ role: 'owner', phone: '9876543210' });
-    if (owner) {
-      req.user = owner;
-      return next();
-    }
-  } catch (err) {
-    console.error('Bypass auth error:', err);
-  }
-
   let token;
 
   if (

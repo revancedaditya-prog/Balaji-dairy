@@ -21,11 +21,11 @@ const runVerification = async () => {
     console.log('✅ Connected to MongoDB successfully.');
 
     // 1. Check Owner User
-    const owner = await User.findOne({ role: 'owner', phone: '9876543210' });
+    const owner = await User.findOne({ role: 'owner', phone: '7906564964' });
     if (owner) {
       console.log(`✅ Owner User verified. Name: "${owner.name}", Phone: "${owner.phone}", Status: "${owner.status}"`);
     } else {
-      console.log('❌ Owner User (phone: 9876543210) NOT found in the database. Please run "npm run seed" in the backend.');
+      console.log('❌ Owner User (phone: 7906564964) NOT found in the database. Please run "npm run seed" in the backend.');
     }
 
     // 2. Check Rate Chart Entries

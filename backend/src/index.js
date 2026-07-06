@@ -12,6 +12,7 @@ const reportRoutes = require('./routes/reportRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const auditRoutes = require('./routes/auditRoutes');
 const backupRoutes = require('./routes/backupRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 // Initialize app
 const app = express();
@@ -41,6 +42,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/audit-logs', auditRoutes);
 app.use('/api/backup', backupRoutes);
+app.use('/api/users', userRoutes);
 
 // 404 Route handler
 app.use((req, res, next) => {

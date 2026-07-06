@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supplierService } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import * as XLSX from 'xlsx';
 
 const Suppliers = () => {
+  const { user } = useAuth();
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -315,21 +317,25 @@ const Suppliers = () => {
           <p className="text-muted">Register and configure dairy farmers directory</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn btn-outline" onClick={downloadTemplate} title="Download Import Excel Template">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-            Download Template
-          </button>
-          <button className="btn btn-outline" onClick={() => document.getElementById('excel-file-input').click()}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-            Import Excel
-          </button>
-          <input
-            type="file"
-            id="excel-file-input"
-            accept=".xlsx, .xls"
-            onChange={handleExcelUpload}
-            style={{ display: 'none' }}
-          />
+          {user?.role !== 'worker' && (
+            <>
+              <button className="btn btn-outline" onClick={downloadTemplate} title="Download Import Excel Template">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                Download Template
+              </button>
+              <button className="btn btn-outline" onClick={() => document.getElementById('excel-file-input').click()}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                Import Excel
+              </button>
+              <input
+                type="file"
+                id="excel-file-input"
+                accept=".xlsx, .xls"
+                onChange={handleExcelUpload}
+                style={{ display: 'none' }}
+              />
+            </>
+          )}
           <button className="btn btn-outline" onClick={exportToExcel}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
             Export Excel
@@ -338,10 +344,12 @@ const Suppliers = () => {
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14" rx="1"/><path d="M6 6V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/></svg>
             PDF Print
           </button>
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-            Add Supplier
-          </button>
+          {user?.role !== 'worker' && (
+            <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+              Add Supplier
+            </button>
+          )}
         </div>
       </div>
 
@@ -400,7 +408,7 @@ const Suppliers = () => {
                 <th>Village</th>
                 <th>Status</th>
                 <th>Joining Date</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
+                {user?.role !== 'worker' && <th style={{ textAlign: 'right' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -418,22 +426,24 @@ const Suppliers = () => {
                       </span>
                     </td>
                     <td>{new Date(s.joiningDate).toLocaleDateString('en-IN')}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        className="btn btn-outline"
-                        style={{ padding: '0.25rem 0.5rem', marginRight: '0.5rem', fontSize: '0.75rem' }}
-                        onClick={() => handleEdit(s)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="btn btn-danger"
-                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                        onClick={() => handleDelete(s._id, s.supplierCode)}
-                      >
-                        Delete
-                      </button>
-                    </td>
+                    {user?.role !== 'worker' && (
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          className="btn btn-outline"
+                          style={{ padding: '0.25rem 0.5rem', marginRight: '0.5rem', fontSize: '0.75rem' }}
+                          onClick={() => handleEdit(s)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="btn btn-danger"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                          onClick={() => handleDelete(s._id, s.supplierCode)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))
               ) : (

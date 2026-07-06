@@ -178,6 +178,33 @@ export const auditService = {
   },
 };
 
+export const userService = {
+  getUsers: async () => {
+    const res = await API.get('/users');
+    return res.data;
+  },
+  getUserById: async (id) => {
+    const res = await API.get(`/users/${id}`);
+    return res.data;
+  },
+  createUser: async (data) => {
+    const res = await API.post('/users', data);
+    return res.data;
+  },
+  updateUser: async (id, data) => {
+    const res = await API.put(`/users/${id}`, data);
+    return res.data;
+  },
+  deleteUser: async (id) => {
+    const res = await API.delete(`/users/${id}`);
+    return res.data;
+  },
+  resetPassword: async (id, password) => {
+    const res = await API.put(`/users/${id}/reset-password`, { password });
+    return res.data;
+  },
+};
+
 export const backupService = {
   exportUrl: () => {
     const token = localStorage.getItem('token');

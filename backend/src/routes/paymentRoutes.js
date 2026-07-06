@@ -6,15 +6,15 @@ const {
   getLedger,
   getSupplierLedger,
 } = require('../controllers/paymentController');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, authorize } = require('../middleware/authMiddleware');
 
 router.use(protect); // Guard all routes
 
 router.route('/')
-  .post(recordPayment)
-  .get(getPayments);
+  .post(authorize('owner'), recordPayment)
+  .get(authorize('owner', 'manager'), getPayments);
 
-router.get('/ledger', getLedger);
-router.get('/ledger/:code', getSupplierLedger);
+router.get('/ledger', authorize('owner', 'manager'), getLedger);
+router.get('/ledger/:code', authorize('owner', 'manager'), getSupplierLedger);
 
 module.exports = router;

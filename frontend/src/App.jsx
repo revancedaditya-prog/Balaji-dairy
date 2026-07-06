@@ -9,6 +9,7 @@ import RateChart from './components/RateChart/RateChart';
 import Payments from './components/Payments/Payments';
 import Reports from './components/Reports/Reports';
 import Settings from './components/Settings/Settings';
+import UserManagement from './components/UserManagement/UserManagement';
 import './App.css';
 
 const MainApp = () => {
@@ -31,6 +32,14 @@ const MainApp = () => {
 
   // Active view switcher
   const renderActiveView = () => {
+    // Role-based security check for active tab
+    if (user?.role === 'worker' && !['dashboard', 'collection', 'suppliers'].includes(activeTab)) {
+      return <Dashboard />;
+    }
+    if (user?.role === 'manager' && !['dashboard', 'collection', 'suppliers', 'payments', 'reports'].includes(activeTab)) {
+      return <Dashboard />;
+    }
+
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard />;
@@ -44,6 +53,8 @@ const MainApp = () => {
         return <Payments />;
       case 'reports':
         return <Reports />;
+      case 'users':
+        return <UserManagement />;
       case 'settings':
         return <Settings />;
       default:

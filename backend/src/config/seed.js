@@ -28,15 +28,15 @@ const seed = async () => {
     await User.deleteMany({ role: 'owner' });
 
     const owner = new User({
-      name: 'Balaji Owner',
-      phone: '9876543210',
-      password: 'BalajiOwner123', // Will be hashed by pre-save middleware
+      name: 'Aditya Kumar',
+      phone: '7906564964',
+      password: 'AdityaOwner123', // Will be hashed by pre-save middleware
       role: 'owner',
       status: 'active',
     });
 
     await owner.save();
-    console.log('Owner seeded: Phone "9876543210", Password "BalajiOwner123"');
+    console.log('Owner seeded: Phone "7906564964", Password "AdityaOwner123"');
 
     // 2. Seed Rate Chart
     console.log('Seeding Rate Chart matrix...');
