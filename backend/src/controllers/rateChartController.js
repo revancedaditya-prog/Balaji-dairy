@@ -125,3 +125,27 @@ exports.clearRateChart = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// @desc    Delete a single rate
+// @route   DELETE /api/rate-chart/:id
+// @access  Private (Owner Only)
+exports.deleteRate = async (req, res) => {
+  try {
+    const rateEntry = await RateChart.findById(req.params.id);
+    if (!rateEntry) {
+      return res.status(404).json({ success: false, message: 'Rate entry not found' });
+    }
+
+    await rateEntry.deleteOne();
+
+    await logAudit(
+      `${req.user.name} (${req.user.phone})`,
+      'RATE_CHART_DELETE',
+      `Rate entry Fat: ${rateEntry.fat}%, SNF: ${rateEntry.snf}%`
+    );
+
+    res.status(200).json({ success: true, message: 'Rate deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

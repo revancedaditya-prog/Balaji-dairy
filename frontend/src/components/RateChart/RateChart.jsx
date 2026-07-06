@@ -7,6 +7,11 @@ const RateChart = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Search and Pagination State
+  const [search, setSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
+
   // Single cell edit state
   const [editFat, setEditFat] = useState('');
   const [editSnf, setEditSnf] = useState('');
@@ -15,13 +20,6 @@ const RateChart = () => {
   // CSV Import State
   const [csvText, setCsvText] = useState('');
   const [showCsvBox, setShowCsvBox] = useState(false);
-
-  // Constants for standard matrix view
-  const fatLevels = [];
-  for (let f = 3.0; f <= 10.0; f = Math.round((f + 0.1) * 10) / 10) fatLevels.push(f);
-
-  const snfLevels = [];
-  for (let s = 7.0; s <= 10.0; s = Math.round((s + 0.1) * 10) / 10) snfLevels.push(s);
 
   const loadRateChart = async () => {
     try {
@@ -42,12 +40,6 @@ const RateChart = () => {
   useEffect(() => {
     loadRateChart();
   }, []);
-
-  // Map rates array into a direct look-up object for fast grid indexing
-  const rateMap = {};
-  rates.forEach((r) => {
-    rateMap[`${r.fat.toFixed(1)}_${r.snf.toFixed(1)}`] = r.rate;
-  });
 
   const handleSingleSave = async (e) => {
     e.preventDefault();
@@ -143,11 +135,43 @@ const RateChart = () => {
     }
   };
 
+  const handleDeleteRate = async (id, fatVal, snfVal) => {
+    if (!window.confirm(`Are you sure you want to delete the rate for Fat ${fatVal}%, SNF ${snfVal}%?`)) {
+      return;
+    }
+    setError('');
+    setSuccess('');
+    try {
+      const res = await rateChartService.deleteRate(id);
+      if (res.success) {
+        setSuccess(`Deleted rate for Fat ${fatVal}%, SNF ${snfVal}%`);
+        loadRateChart();
+      }
+    } catch (err) {
+      setError('Failed to delete rate entry');
+      console.error(err);
+    }
+  };
+
+  // Search Filter & Pagination Logic
+  const filteredRates = rates.filter((r) => {
+    const fatStr = r.fat.toFixed(1);
+    const snfStr = r.snf.toFixed(1);
+    const rateStr = r.rate.toFixed(2);
+    const s = search.toLowerCase();
+    return fatStr.includes(s) || snfStr.includes(s) || rateStr.includes(s);
+  });
+
+  const totalPages = Math.ceil(filteredRates.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentRates = filteredRates.slice(indexOfFirstItem, indexOfLastItem);
+
   return (
     <div className="rate-chart-view">
       <div className="view-header">
         <div>
-          <h1>Rate Chart Matrix</h1>
+          <h1>Rate Chart Settings</h1>
           <p className="text-muted">Set price per liter based on Fat and SNF milk quality parameters</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -169,11 +193,11 @@ const RateChart = () => {
           {/* Single cell editor */}
           <div className="card">
             <h3 style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
-              Update Single Rate
+              Set Price Rate
             </h3>
             <form onSubmit={handleSingleSave}>
               <div className="form-group">
-                <label className="form-label">FAT (%)</label>
+                <label className="form-label">FAT (%)*</label>
                 <input
                   type="number"
                   step="0.1"
@@ -185,7 +209,7 @@ const RateChart = () => {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">SNF (%)</label>
+                <label className="form-label">SNF (%)*</label>
                 <input
                   type="number"
                   step="0.1"
@@ -197,7 +221,7 @@ const RateChart = () => {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Rate (₹ per Liter)</label>
+                <label className="form-label">Rate (₹ per Liter)*</label>
                 <input
                   type="number"
                   step="0.01"
@@ -243,71 +267,118 @@ const RateChart = () => {
           )}
         </div>
 
-        {/* Scrollable Matrix Grid */}
+        {/* Scrollable Rate List Grid */}
         <div style={{ gridColumn: 'span 2' }}>
-          <div className="card" style={{ padding: '1rem' }}>
-            <h3 style={{ marginBottom: '0.5rem' }}>FAT vs SNF Price Lookup Matrix (₹)</h3>
-            <p className="text-muted" style={{ fontSize: '0.8rem', marginBottom: '1rem' }}>
-              Fat values on vertical axis, SNF values on horizontal headers. Scroll sideways to view high values.
-            </p>
+          <div className="card" style={{ padding: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div>
+                <h3 style={{ marginBottom: '0.25rem' }}>FAT & SNF Rate Index</h3>
+                <p className="text-muted" style={{ fontSize: '0.8rem' }}>
+                  Index of configured pricing rates per liter
+                </p>
+              </div>
+              <div style={{ width: '220px' }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search rates..."
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setCurrentPage(1); // Reset to page 1 on search
+                  }}
+                  style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem' }}
+                />
+              </div>
+            </div>
 
             {loading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem' }}>
                 <div className="spinner"></div>
-                <span style={{ marginTop: '0.5rem' }}>Building matrix lookup grid...</span>
+                <span style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Fetching rate database...</span>
               </div>
             ) : (
-              <div className="matrix-scroll-wrapper" style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
-                <table className="matrix-table" style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
-                      <th style={{ padding: '8px', borderRight: '1px solid var(--border)', fontWeight: 'bold', backgroundColor: '#e2e8f0', textAlign: 'center', position: 'sticky', left: 0, zIndex: 1 }}>
-                        FAT / SNF
-                      </th>
-                      {snfLevels.map((s) => (
-                        <th key={s} style={{ padding: '8px 12px', borderRight: '1px solid var(--border)', fontWeight: '600', color: 'var(--text-muted)', textAlign: 'center' }}>
-                          {s.toFixed(1)}%
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fatLevels.map((f) => (
-                      <tr key={f} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '8px', borderRight: '1px solid var(--border)', fontWeight: 'bold', backgroundColor: '#f1f5f9', textAlign: 'center', position: 'sticky', left: 0, zIndex: 1 }}>
-                          {f.toFixed(1)}%
-                        </td>
-                        {snfLevels.map((s) => {
-                          const lookupKey = `${f.toFixed(1)}_${s.toFixed(1)}`;
-                          const rateVal = rateMap[lookupKey];
-                          return (
-                            <td
-                              key={s}
-                              onClick={() => {
-                                setEditFat(f.toFixed(1));
-                                setEditSnf(s.toFixed(1));
-                                setEditRate(rateVal || '');
-                              }}
-                              style={{
-                                padding: '8px 12px',
-                                borderRight: '1px solid var(--border)',
-                                textAlign: 'center',
-                                cursor: 'pointer',
-                                backgroundColor: rateVal ? 'transparent' : '#fef2f2',
-                                fontWeight: rateVal ? '600' : 'normal',
-                                color: rateVal ? 'var(--text-main)' : 'var(--danger)'
-                              }}
-                              title={`Fat ${f}%, SNF ${s}%`}
-                            >
-                              {rateVal ? `₹${rateVal.toFixed(2)}` : 'N/A'}
-                            </td>
-                          );
-                        })}
+              <>
+                <div className="table-container">
+                  <table className="table" style={{ fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr>
+                        <th>FAT (%)</th>
+                        <th>SNF (%)</th>
+                        <th>Rate (₹/Liter)</th>
+                        <th style={{ textAlign: 'right' }}>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {currentRates.length > 0 ? (
+                        currentRates.map((r) => (
+                          <tr key={r._id}>
+                            <td style={{ fontWeight: '600' }}>{r.fat.toFixed(1)}%</td>
+                            <td style={{ fontWeight: '600' }}>{r.snf.toFixed(1)}%</td>
+                            <td style={{ fontWeight: '700', color: 'var(--primary)' }}>₹{r.rate.toFixed(2)}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <button
+                                className="btn btn-outline"
+                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', marginRight: '0.35rem' }}
+                                onClick={() => {
+                                  setEditFat(r.fat.toFixed(1));
+                                  setEditSnf(r.snf.toFixed(1));
+                                  setEditRate(r.rate.toFixed(2));
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="btn btn-danger"
+                                style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                                onClick={() => handleDeleteRate(r._id, r.fat, r.snf)}
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-light)', padding: '2rem' }}>
+                            No rate entries found in the database.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination Controls */}
+                {totalPages > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, filteredRates.length)} of {filteredRates.length} entries
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <button
+                        className="btn btn-outline"
+                        style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </button>
+                      <span style={{ display: 'flex', alignItems: 'center', padding: '0 0.5rem', fontSize: '0.8rem', fontWeight: '500' }}>
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <button
+                        className="btn btn-outline"
+                        style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

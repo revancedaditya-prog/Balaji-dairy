@@ -6,6 +6,7 @@ const {
   lookupRate,
   getRateChart,
   clearRateChart,
+  deleteRate,
 } = require('../controllers/rateChartController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -21,5 +22,8 @@ router.route('/bulk')
 
 router.route('/lookup')
   .get(lookupRate);
+
+router.route('/:id')
+  .delete(authorize('owner'), deleteRate);
 
 module.exports = router;

@@ -119,6 +119,10 @@ export const rateChartService = {
     const res = await API.delete('/rate-chart');
     return res.data;
   },
+  deleteRate: async (id) => {
+    const res = await API.delete(`/rate-chart/${id}`);
+    return res.data;
+  },
 };
 
 export const reportService = {

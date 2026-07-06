@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supplierService, milkEntryService } from '../../services/api';
+import { supplierService, milkEntryService, rateChartService } from '../../services/api';
 import * as XLSX from 'xlsx';
 
 const MilkCollection = () => {
@@ -65,6 +65,30 @@ const MilkCollection = () => {
 
     return () => clearInterval(timer);
   }, [customDateTime]);
+
+  // Auto rate lookup when FAT and SNF are entered
+  useEffect(() => {
+    const lookupRateValue = async () => {
+      const fatVal = parseFloat(fat);
+      const snfVal = parseFloat(snf);
+      if (!isNaN(fatVal) && fatVal > 0 && !isNaN(snfVal) && snfVal > 0) {
+        try {
+          const res = await rateChartService.lookupRate(fatVal, snfVal);
+          if (res.success && res.rate > 0) {
+            setRate(res.rate.toString());
+            const qty = parseFloat(quantity) || 0;
+            setAmount((Math.round(qty * res.rate * 100) / 100).toString());
+            setFormError('');
+          }
+        } catch (err) {
+          // Rate not found in chart, clear auto-calculated fields
+          setRate('');
+          setAmount('');
+        }
+      }
+    };
+    lookupRateValue();
+  }, [fat, snf]);
 
   // Lookup Supplier Name when code is entered
   const lookupSupplier = async (code) => {
@@ -450,19 +474,18 @@ const MilkCollection = () => {
             {/* Manual Rate & Amount Entry */}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
               <div style={{ flex: 1 }}>
-                <label className="form-label">Rate (₹/L)*</label>
+                <label className="form-label">Rate (₹/L)</label>
                 <input
                   type="number"
                   step="0.01"
                   className="form-control"
-                  placeholder="Rate/L"
+                  placeholder="Rate/L (Auto-filled)"
                   value={rate}
                   onChange={(e) => handleRateChange(e.target.value)}
-                  required
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label className="form-label">Total Amount (₹)*</label>
+                <label className="form-label">Total Amount (₹)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -470,7 +493,6 @@ const MilkCollection = () => {
                   placeholder="Total Amount"
                   value={amount}
                   onChange={(e) => handleAmountChange(e.target.value)}
-                  required
                 />
               </div>
             </div>
