@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { reportService } from '../../services/api';
 import * as XLSX from 'xlsx';
+import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
 
 const Reports = () => {
   const [reportType, setReportType] = useState('shift-wise');
@@ -14,6 +15,9 @@ const Reports = () => {
   const [filterShift, setFilterShift] = useState('');
   const [filterCode, setFilterCode] = useState('');
   const [filterVillage, setFilterVillage] = useState('');
+
+  // Collapsible Filters Panel on Mobile
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   const loadReport = async () => {
     try {
@@ -66,13 +70,11 @@ const Reports = () => {
   // Aggregate stats from report data
   const totalMilk = reportData.reduce((sum, item) => sum + item.totalMilk, 0);
   const totalAmount = reportData.reduce((sum, item) => sum + item.totalAmount, 0);
-  // Weighted Averages
   const weightedFatSum = reportData.reduce((sum, item) => sum + (item.avgFat * item.totalMilk), 0);
   const weightedSnfSum = reportData.reduce((sum, item) => sum + (item.avgSnf * item.totalMilk), 0);
   const avgFat = totalMilk > 0 ? weightedFatSum / totalMilk : 0;
   const avgSnf = totalMilk > 0 ? weightedSnfSum / totalMilk : 0;
 
-  // Headers rendering helpers based on selected reportType
   const getHeaders = () => {
     switch (reportType) {
       case 'shift-wise':
@@ -112,6 +114,23 @@ const Reports = () => {
         return [item.year, ...commonCells];
       default:
         return [];
+    }
+  };
+
+  const getMobileCardLabel = (item) => {
+    switch (reportType) {
+      case 'shift-wise':
+        return `${item.date} • ${item.shift}`;
+      case 'supplier-wise':
+        return `#${item.supplierCode} - ${item.supplierName}`;
+      case 'village-wise':
+        return `Village: ${item.village}`;
+      case 'monthly':
+        return `Month: ${item.month}`;
+      case 'yearly':
+        return `Year: ${item.year}`;
+      default:
+        return 'Summary Record';
     }
   };
 
@@ -188,96 +207,97 @@ const Reports = () => {
   };
 
   return (
-    <div className="reports-view">
-      <div className="view-header">
-        <div>
-          <h1>Reports Generator</h1>
-          <p className="text-muted">Analyze dairy collections by date range, shift, village, or individual farmer</p>
-        </div>
-      </div>
-
-      {/* Select Report Mode */}
-      <div className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+    <div className="reports-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
+      {/* Select Report Mode Buttons */}
+      <Card style={{ padding: '0.75rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', gap: '0.35rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
           {[
-            { id: 'shift-wise', name: 'Daily & Shift Report' },
-            { id: 'supplier-wise', name: 'Farmer-wise Statement' },
-            { id: 'village-wise', name: 'Village-wise Summary' },
-            { id: 'monthly', name: 'Monthly Statement' },
-            { id: 'yearly', name: 'Yearly Statement' },
+            { id: 'shift-wise', name: 'Shift-wise' },
+            { id: 'supplier-wise', name: 'Farmer-wise' },
+            { id: 'village-wise', name: 'Village-wise' },
+            { id: 'monthly', name: 'Monthly' },
+            { id: 'yearly', name: 'Yearly' },
           ].map((item) => (
-            <button
+            <Button
               key={item.id}
-              className={`btn ${reportType === item.id ? 'btn-primary' : 'btn-outline'}`}
+              variant={reportType === item.id ? 'primary' : 'outlined'}
               onClick={() => setReportType(item.id)}
+              style={{ minHeight: '38px', padding: '0.5rem 1rem', whiteSpace: 'nowrap', fontSize: '0.85rem' }}
             >
               {item.name}
-            </button>
+            </Button>
           ))}
         </div>
-      </div>
+      </Card>
 
-      <div className="grid grid-cols-3" style={{ gap: '1.5rem', alignItems: 'start' }}>
-        {/* Filter Configuration */}
-        <div style={{ gridColumn: 'span 1' }} className="grid" style={{ gap: '1rem' }}>
-          <div className="card">
-            <h3 style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
-              Query Filters
-            </h3>
-            <div className="form-group">
-              <label className="form-label">Start Date</label>
-              <input
+      <div className="grid grid-cols-3" style={{ gap: '1rem', alignItems: 'start' }}>
+        {/* Expandable Query Filters Panel */}
+        <div style={{ gridColumn: 'span 1' }}>
+          
+          {/* Mobile Collapsible Header */}
+          <Card 
+            className="mobile-only" 
+            style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: '0.5rem' }}
+            onClick={() => setFiltersExpanded(!filtersExpanded)}
+          >
+            <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>Configure Search Filters</span>
+            <span>{filtersExpanded ? '▲' : '▼'}</span>
+          </Card>
+
+          {/* Actual Filters Box */}
+          <div className={`${!filtersExpanded ? 'desktop-only' : ''}`}>
+            <Card style={{ padding: '1.25rem' }}>
+              <h3 className="desktop-only" style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', borderBottom: '1px solid var(--md-sys-color-surface-variant)', paddingBottom: '0.5rem' }}>
+                Query Filters
+              </h3>
+              
+              <Input
+                label="Start Date"
                 type="date"
-                className="form-control"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
               />
-            </div>
-            <div className="form-group">
-              <label className="form-label">End Date</label>
-              <input
+              <Input
+                label="End Date"
                 type="date"
-                className="form-control"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
               />
-            </div>
-            {reportType === 'shift-wise' && (
-              <div className="form-group">
-                <label className="form-label">Shift</label>
-                <select className="form-control" value={filterShift} onChange={(e) => setFilterShift(e.target.value)}>
-                  <option value="">All Shifts</option>
-                  <option value="Morning">Morning</option>
-                  <option value="Evening">Evening</option>
-                </select>
-              </div>
-            )}
-            <div className="form-group">
-              <label className="form-label">Village Filter</label>
-              <input
+
+              {reportType === 'shift-wise' && (
+                <div className="form-group">
+                  <label className="input-md3-label">Shift</label>
+                  <select className="input-md3-control" value={filterShift} onChange={(e) => setFilterShift(e.target.value)}>
+                    <option value="">All Shifts</option>
+                    <option value="Morning">Morning</option>
+                    <option value="Evening">Evening</option>
+                  </select>
+                </div>
+              )}
+
+              <Input
+                label="Village Filter"
                 type="text"
-                className="form-control"
-                placeholder="Type village name..."
+                placeholder="Village name..."
                 value={filterVillage}
                 onChange={(e) => setFilterVillage(e.target.value)}
               />
-            </div>
-            {reportType === 'supplier-wise' && (
-              <div className="form-group">
-                <label className="form-label">Farmer Code Filter</label>
-                <input
+
+              {reportType === 'supplier-wise' && (
+                <Input
+                  label="Farmer Code Filter"
                   type="number"
-                  className="form-control"
-                  placeholder="Filter by farmer code..."
+                  placeholder="Farmer code..."
                   value={filterCode}
                   onChange={(e) => setFilterCode(e.target.value)}
                 />
+              )}
+
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                <Button variant="outlined" style={{ flex: 1, minHeight: '40px' }} onClick={exportExcel}>Excel</Button>
+                <Button variant="outlined" style={{ flex: 1, minHeight: '40px' }} onClick={exportPDF}>Print PDF</Button>
               </div>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-              <button className="btn btn-outline" style={{ flex: 1 }} onClick={exportExcel}>Excel</button>
-              <button className="btn btn-outline" style={{ flex: 1 }} onClick={exportPDF}>Print PDF</button>
-            </div>
+            </Card>
           </div>
         </div>
 
@@ -286,61 +306,93 @@ const Reports = () => {
           {error && <div className="error-alert" style={{ marginBottom: '1rem' }}>{error}</div>}
 
           {/* Aggregates Dashboard Row */}
-          <div className="card grid grid-cols-4" style={{ padding: '1rem', marginBottom: '1rem', border: '1px solid var(--accent)' }}>
-            <div style={{ textAlign: 'center' }}>
-              <span className="text-muted" style={{ fontSize: '0.75rem' }}>Total Milk</span>
-              <h4 style={{ color: 'var(--primary)', fontSize: '1.25rem', marginTop: '0.25rem' }}>{totalMilk.toFixed(2)} L</h4>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <span className="text-muted" style={{ fontSize: '0.75rem' }}>Weighted FAT</span>
-              <h4 style={{ color: 'var(--text-main)', fontSize: '1.25rem', marginTop: '0.25rem' }}>{avgFat.toFixed(2)}%</h4>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <span className="text-muted" style={{ fontSize: '0.75rem' }}>Weighted SNF</span>
-              <h4 style={{ color: 'var(--text-main)', fontSize: '1.25rem', marginTop: '0.25rem' }}>{avgSnf.toFixed(2)}%</h4>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <span className="text-muted" style={{ fontSize: '0.75rem' }}>Total Valuation</span>
-              <h4 style={{ color: 'var(--secondary)', fontSize: '1.25rem', marginTop: '0.25rem' }}>₹{totalAmount.toFixed(2)}</h4>
-            </div>
+          <div className="grid grid-cols-4" style={{ marginBottom: '1rem' }}>
+            <Card style={{ padding: '0.75rem', textAlign: 'center' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Total Volume</span>
+              <h4 style={{ color: 'var(--md-sys-color-primary)', fontSize: '1.15rem', marginTop: '0.25rem' }}>{totalMilk.toFixed(2)} L</h4>
+            </Card>
+            <Card style={{ padding: '0.75rem', textAlign: 'center' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Weighted FAT</span>
+              <h4 style={{ color: 'var(--md-sys-color-on-surface)', fontSize: '1.15rem', marginTop: '0.25rem' }}>{avgFat.toFixed(2)}%</h4>
+            </Card>
+            <Card style={{ padding: '0.75rem', textAlign: 'center' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Weighted SNF</span>
+              <h4 style={{ color: 'var(--md-sys-color-on-surface)', fontSize: '1.15rem', marginTop: '0.25rem' }}>{avgSnf.toFixed(2)}%</h4>
+            </Card>
+            <Card style={{ padding: '0.75rem', textAlign: 'center' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Valuation</span>
+              <h4 style={{ color: 'var(--md-sys-color-success)', fontSize: '1.15rem', marginTop: '0.25rem' }}>₹{totalAmount.toFixed(2)}</h4>
+            </Card>
           </div>
 
-          {/* Results table */}
-          <div className="table-container">
-            {loading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem' }}>
-                <div className="spinner"></div>
-                <span style={{ marginTop: '0.5rem' }}>Aggregating database collection tables...</span>
-              </div>
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    {getHeaders().map((h) => <th key={h}>{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportData.length > 0 ? (
-                    reportData.map((item, idx) => (
-                      <tr key={idx}>
-                        {getRowCells(item).map((cell, cIdx) => (
-                          <td key={cIdx} style={cIdx === 0 ? { fontWeight: '600' } : {}}>
-                            {cell}
-                          </td>
-                        ))}
-                      </tr>
-                    ))
-                  ) : (
+          {/* Desktop Results Table */}
+          <Card style={{ padding: '1rem' }} className="desktop-only">
+            <div className="table-container">
+              {loading ? (
+                <Loading label="Aggregating records..." />
+              ) : (
+                <table className="table">
+                  <thead>
                     <tr>
-                      <td colSpan={getHeaders().length} style={{ textAlign: 'center', color: 'var(--text-light)', padding: '2rem' }}>
-                        No records logged in the system matching filters.
-                      </td>
+                      {getHeaders().map((h) => <th key={h}>{h}</th>)}
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {reportData.length > 0 ? (
+                      reportData.map((item, idx) => (
+                        <tr key={idx}>
+                          {getRowCells(item).map((cell, cIdx) => (
+                            <td key={cIdx} style={cIdx === 0 ? { fontWeight: '600' } : {}}>
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={getHeaders().length} style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
+                          No records logged in the system matching filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </Card>
+
+          {/* Mobile Results Cards */}
+          <div className="mobile-card-list mobile-only">
+            {loading ? (
+              <Loading label="Aggregating records..." />
+            ) : reportData.length > 0 ? (
+              reportData.map((item, idx) => (
+                <div key={idx} className="mobile-row-card">
+                  <div className="mobile-row-card-header">
+                    <div className="mobile-row-card-title">{getMobileCardLabel(item)}</div>
+                    <Badge type="primary">{item.entryCount} Entries</Badge>
+                  </div>
+                  <div className="mobile-row-card-body">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                      <span>Milk Collected:</span>
+                      <span style={{ fontWeight: '600' }}>{item.totalMilk.toFixed(2)} L</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                      <span>Avg FAT / Avg SNF:</span>
+                      <span>{item.avgFat.toFixed(2)}% / {item.avgSnf.toFixed(2)}%</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', borderTop: '1px dashed var(--md-sys-color-surface-variant)', paddingTop: '0.25rem' }}>
+                      <span style={{ fontWeight: '600' }}>Total Amount:</span>
+                      <span style={{ fontWeight: '700', color: 'var(--md-sys-color-success)' }}>₹{item.totalAmount.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyState message="No collection logs match filter query" />
             )}
           </div>
+
         </div>
       </div>
     </div>

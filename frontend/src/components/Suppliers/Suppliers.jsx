@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supplierService } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import * as XLSX from 'xlsx';
+import { Card, Button, Input, Badge, Modal, EmptyState, Loading } from '../Common/MaterialComponents';
 
 const Suppliers = () => {
   const { user } = useAuth();
@@ -77,8 +78,8 @@ const Suppliers = () => {
     setFormData({
       supplierCode: supplier.supplierCode,
       supplierName: supplier.supplierName,
-      fatherName: supplier.fatherName,
-      mobile: supplier.mobile,
+      fatherName: supplier.fatherName || '',
+      mobile: supplier.mobile || '',
       village: supplier.village,
       status: supplier.status,
       joiningDate: supplier.joiningDate ? supplier.joiningDate.split('T')[0] : new Date().toISOString().split('T')[0]
@@ -98,7 +99,6 @@ const Suppliers = () => {
 
     try {
       if (editingId) {
-        // Update
         const res = await supplierService.updateSupplier(editingId, payload);
         if (res.success) {
           setSuccess('Supplier updated successfully');
@@ -106,7 +106,6 @@ const Suppliers = () => {
           resetForm();
         }
       } else {
-        // Create
         const res = await supplierService.addSupplier(payload);
         if (res.success) {
           setSuccess('Supplier added successfully');
@@ -153,21 +152,10 @@ const Suppliers = () => {
     const worksheet = XLSX.utils.json_to_sheet(formattedData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Suppliers');
-
-    // Auto-fit column widths
-    const maxLens = {};
-    formattedData.forEach((row) => {
-      Object.keys(row).forEach((key) => {
-        const len = String(row[key] || '').length;
-        maxLens[key] = Math.max(maxLens[key] || key.length, len);
-      });
-    });
-    worksheet['!cols'] = Object.keys(maxLens).map((key) => ({ wch: maxLens[key] + 3 }));
-
     XLSX.writeFile(workbook, `Suppliers_List_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  // PDF Export using Browser Print stylesheet formatting
+  // PDF Export
   const exportToPDF = () => {
     const printContent = `
       <html>
@@ -226,7 +214,6 @@ const Suppliers = () => {
     printWindow.close();
   };
 
-  // Download sample Excel template for imports
   const downloadTemplate = () => {
     const templateData = [
       {
@@ -245,7 +232,6 @@ const Suppliers = () => {
     XLSX.writeFile(workbook, 'Supplier_Import_Template.xlsx');
   };
 
-  // Parse Excel file and upload suppliers
   const handleExcelUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -264,7 +250,6 @@ const Suppliers = () => {
           return;
         }
 
-        // Map parsed Excel keys to standard supplier keys case-insensitively
         const mappedSuppliers = rawData.map((row) => {
           const findVal = (patterns) => {
             const key = Object.keys(row).find((k) => 
@@ -302,7 +287,6 @@ const Suppliers = () => {
         console.error(err);
       } finally {
         setLoading(false);
-        // Clear input value so same file can be uploaded again if needed
         e.target.value = '';
       }
     };
@@ -310,23 +294,42 @@ const Suppliers = () => {
   };
 
   return (
-    <div className="suppliers-view">
-      <div className="view-header">
-        <div>
-          <h1>Supplier Management</h1>
-          <p className="text-muted">Register and configure dairy farmers directory</p>
+    <div className="suppliers-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
+      {success && <div className="success-alert" style={{ marginBottom: '1rem' }}>{success}</div>}
+      {error && <div className="error-alert" style={{ marginBottom: '1rem' }}>{error}</div>}
+
+      {/* Search and Filters */}
+      <Card style={{ padding: '1rem', marginBottom: '1rem' }}>
+        <div className="grid grid-cols-3" style={{ gap: '0.75rem' }}>
+          <Input
+            label="Search Farmer"
+            type="text"
+            placeholder="Search by Code or Name..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <Input
+            label="Filter by Village"
+            type="text"
+            placeholder="Village name..."
+            value={village}
+            onChange={(e) => setVillage(e.target.value)}
+          />
+          <div>
+            <label className="input-md3-label">Filter by Status</label>
+            <select className="input-md3-control" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
           {user?.role !== 'worker' && (
             <>
-              <button className="btn btn-outline" onClick={downloadTemplate} title="Download Import Excel Template">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                Download Template
-              </button>
-              <button className="btn btn-outline" onClick={() => document.getElementById('excel-file-input').click()}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-                Import Excel
-              </button>
+              <Button variant="outlined" onClick={downloadTemplate} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Download Template</Button>
+              <Button variant="outlined" onClick={() => document.getElementById('excel-file-input').click()} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Import Excel</Button>
               <input
                 type="file"
                 id="excel-file-input"
@@ -336,231 +339,244 @@ const Suppliers = () => {
               />
             </>
           )}
-          <button className="btn btn-outline" onClick={exportToExcel}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-            Export Excel
-          </button>
-          <button className="btn btn-outline" onClick={exportToPDF}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14" rx="1"/><path d="M6 6V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/></svg>
-            PDF Print
-          </button>
+          <Button variant="outlined" onClick={exportToExcel} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Export Excel</Button>
+          <Button variant="outlined" onClick={exportToPDF} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>PDF Print</Button>
+          
+          {/* Desktop Only Add button */}
           {user?.role !== 'worker' && (
-            <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            <Button variant="primary" className="desktop-only" onClick={() => setShowModal(true)} style={{ marginLeft: 'auto', minHeight: '40px', padding: '0.5rem 1.25rem' }}>
               Add Supplier
-            </button>
+            </Button>
           )}
         </div>
-      </div>
+      </Card>
 
-      {success && <div className="success-alert">{success}</div>}
-      {error && <div className="error-alert">{error}</div>}
+      {/* Mobile Floating Action Button (FAB) */}
+      {user?.role !== 'worker' && (
+        <button 
+          className="fab-md3 mobile-only" 
+          onClick={() => setShowModal(true)}
+          aria-label="Add Supplier"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+        </button>
+      )}
 
-      {/* Filter and Search Bar */}
-      <div className="card filters-card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
-        <div className="grid grid-cols-3" style={{ gap: '1rem' }}>
-          <div>
-            <label className="form-label">Search Supplier</label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Search by Code or Name..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="form-label">Filter by Village</label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Enter village name..."
-              value={village}
-              onChange={(e) => setVillage(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="form-label">Filter by Status</label>
-            <select className="form-control" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">All Statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Suppliers Table */}
-      <div className="table-container">
-        {loading ? (
-          <div className="table-loading">
-            <div className="spinner"></div>
-            <span>Fetching supplier list...</span>
-          </div>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Supplier Name</th>
-                <th>Father Name</th>
-                <th>Mobile Number</th>
-                <th>Village</th>
-                <th>Status</th>
-                <th>Joining Date</th>
-                {user?.role !== 'worker' && <th style={{ textAlign: 'right' }}>Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers.length > 0 ? (
-                suppliers.map((s) => (
-                  <tr key={s._id}>
-                    <td style={{ fontWeight: '600' }}>#{s.supplierCode}</td>
-                    <td>{s.supplierName}</td>
-                    <td>{s.fatherName}</td>
-                    <td>{s.mobile}</td>
-                    <td>{s.village}</td>
-                    <td>
-                      <span className={`badge badge-${s.status === 'active' ? 'active' : 'inactive'}`}>
-                        {s.status}
-                      </span>
-                    </td>
-                    <td>{new Date(s.joiningDate).toLocaleDateString('en-IN')}</td>
-                    {user?.role !== 'worker' && (
-                      <td style={{ textAlign: 'right' }}>
-                        <button
-                          className="btn btn-outline"
-                          style={{ padding: '0.25rem 0.5rem', marginRight: '0.5rem', fontSize: '0.75rem' }}
-                          onClick={() => handleEdit(s)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="btn btn-danger"
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                          onClick={() => handleDelete(s._id, s.supplierCode)}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))
-              ) : (
+      {/* Desktop List View */}
+      <Card style={{ padding: '1rem' }} className="desktop-only">
+        <div className="table-container">
+          {loading ? (
+            <Loading label="Fetching supplier list..." />
+          ) : (
+            <table className="table">
+              <thead>
                 <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-light)', padding: '2rem' }}>
-                    No matching suppliers found in the system.
-                  </td>
+                  <th>Code</th>
+                  <th>Supplier Name</th>
+                  <th>Father Name</th>
+                  <th>Mobile Number</th>
+                  <th>Village</th>
+                  <th>Status</th>
+                  <th>Joining Date</th>
+                  {user?.role !== 'worker' && <th style={{ textAlign: 'right' }}>Actions</th>}
                 </tr>
+              </thead>
+              <tbody>
+                {suppliers.length > 0 ? (
+                  suppliers.map((s) => (
+                    <tr key={s._id}>
+                      <td style={{ fontWeight: '600' }}>#{s.supplierCode}</td>
+                      <td>{s.supplierName}</td>
+                      <td>{s.fatherName}</td>
+                      <td>{s.mobile}</td>
+                      <td>{s.village}</td>
+                      <td>
+                        <Badge type={s.status === 'active' ? 'success' : 'error'}>
+                          {s.status}
+                        </Badge>
+                      </td>
+                      <td>{new Date(s.joiningDate).toLocaleDateString('en-IN')}</td>
+                      {user?.role !== 'worker' && (
+                        <td style={{ textAlign: 'right' }}>
+                          <Button
+                            variant="outlined"
+                            style={{ padding: '0.25rem 0.5rem', marginRight: '0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
+                            onClick={() => handleEdit(s)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="danger"
+                            style={{ padding: '0.25rem 0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
+                            onClick={() => handleDelete(s._id, s.supplierCode)}
+                          >
+                            Delete
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="8" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
+                      No matching suppliers found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+
+      {/* Mobile Card List View */}
+      <div className="mobile-card-list mobile-only">
+        {loading ? (
+          <Loading label="Fetching supplier list..." />
+        ) : suppliers.length > 0 ? (
+          suppliers.map((s) => (
+            <div key={s._id} className="mobile-row-card" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
+              <div className="mobile-row-card-header">
+                <div className="mobile-row-card-title">
+                  <Badge type="primary" style={{ marginRight: '0.5rem' }}>#{s.supplierCode}</Badge>
+                  {s.supplierName}
+                </div>
+                <Badge type={s.status === 'active' ? 'success' : 'error'}>
+                  {s.status}
+                </Badge>
+              </div>
+              <div className="mobile-row-card-body">
+                {s.fatherName && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <span>Father's Name:</span>
+                    <span>{s.fatherName}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                  <span>Village:</span>
+                  <span style={{ fontWeight: '500' }}>{s.village}</span>
+                </div>
+                {s.mobile && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                    <span>Mobile:</span>
+                    <a href={`tel:${s.mobile}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none', color: 'var(--md-sys-color-primary)', fontWeight: '600' }}>
+                      {s.mobile}
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 9.92z"/></svg>
+                    </a>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '0.25rem' }}>
+                  <span>Joined:</span>
+                  <span>{new Date(s.joiningDate).toLocaleDateString('en-IN')}</span>
+                </div>
+              </div>
+              {user?.role !== 'worker' && (
+                <div className="mobile-row-card-actions">
+                  <Button
+                    variant="outlined"
+                    style={{ padding: '0.25rem 0.75rem', minHeight: '36px', fontSize: '0.8rem' }}
+                    onClick={() => handleEdit(s)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="danger"
+                    style={{ padding: '0.25rem 0.75rem', minHeight: '36px', fontSize: '0.8rem' }}
+                    onClick={() => handleDelete(s._id, s.supplierCode)}
+                  >
+                    Delete
+                  </Button>
+                </div>
               )}
-            </tbody>
-          </table>
+            </div>
+          ))
+        ) : (
+          <EmptyState message="No farmers registered match the filter search criteria" />
         )}
       </div>
 
-      {/* Modal Popup Form */}
-      {showModal && (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <div className="modal-header">
-              <h2>{editingId ? `Edit Supplier Profile (#${formData.supplierCode})` : 'Register New Supplier'}</h2>
-              <button className="btn-close" onClick={resetForm}>&times;</button>
+      {/* Register/Edit Modal Dialog */}
+      <Modal
+        isOpen={showModal}
+        onClose={resetForm}
+        title={editingId ? `Edit Supplier Profile (#${formData.supplierCode})` : 'Register New Supplier'}
+      >
+        <form onSubmit={handleSubmit}>
+          <div className="grid grid-cols-2" style={{ gap: '0.75rem' }}>
+            <Input
+              label="Supplier Code (Unique Number)*"
+              type="number"
+              inputMode="numeric"
+              name="supplierCode"
+              value={formData.supplierCode}
+              onChange={handleInputChange}
+              required
+              disabled={!!editingId}
+              placeholder="e.g. 101"
+              className={editingId ? '' : 'flex-1'}
+            />
+            <Input
+              label="Farmer Name*"
+              type="text"
+              name="supplierName"
+              value={formData.supplierName}
+              onChange={handleInputChange}
+              required
+              placeholder="Enter full name"
+            />
+            <Input
+              label="Father's Name"
+              type="text"
+              name="fatherName"
+              value={formData.fatherName}
+              onChange={handleInputChange}
+              placeholder="Enter father's name"
+            />
+            <Input
+              label="Mobile Number"
+              type="tel"
+              name="mobile"
+              value={formData.mobile}
+              onChange={handleInputChange}
+              placeholder="10-digit number"
+            />
+            <Input
+              label="Village*"
+              type="text"
+              name="village"
+              value={formData.village}
+              onChange={handleInputChange}
+              required
+              placeholder="Village name"
+            />
+            <Input
+              label="Joining Date"
+              type="date"
+              name="joiningDate"
+              value={formData.joiningDate}
+              onChange={handleInputChange}
+            />
+            <div className="form-group" style={{ gridColumn: 'span 2' }}>
+              <label className="input-md3-label">Status*</label>
+              <select
+                name="status"
+                className="input-md3-control"
+                value={formData.status}
+                onChange={handleInputChange}
+                required
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
             </div>
-            <form onSubmit={handleSubmit}>
-              <div className="modal-body">
-                <div className="grid grid-cols-2" style={{ gap: '1rem' }}>
-                  <div className="form-group">
-                    <label className="form-label">Supplier Code (Unique Number)*</label>
-                    <input
-                      type="number"
-                      name="supplierCode"
-                      className="form-control"
-                      value={formData.supplierCode}
-                      onChange={handleInputChange}
-                      required
-                      disabled={!!editingId}
-                      placeholder="e.g. 101"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Farmer / Supplier Name*</label>
-                    <input
-                      type="text"
-                      name="supplierName"
-                      className="form-control"
-                      value={formData.supplierName}
-                      onChange={handleInputChange}
-                      required
-                      placeholder="Enter full name"
-                    />
-                  </div>
-                   <div className="form-group">
-                    <label className="form-label">Father's Name</label>
-                    <input
-                      type="text"
-                      name="fatherName"
-                      className="form-control"
-                      value={formData.fatherName}
-                      onChange={handleInputChange}
-                      placeholder="Enter father's name"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Mobile Number</label>
-                    <input
-                      type="tel"
-                      name="mobile"
-                      className="form-control"
-                      value={formData.mobile}
-                      onChange={handleInputChange}
-                      placeholder="10-digit number"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Village*</label>
-                    <input
-                      type="text"
-                      name="village"
-                      className="form-control"
-                      value={formData.village}
-                      onChange={handleInputChange}
-                      required
-                      placeholder="Village name"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Joining Date</label>
-                    <input
-                      type="date"
-                      name="joiningDate"
-                      className="form-control"
-                      value={formData.joiningDate}
-                      onChange={handleInputChange}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Status*</label>
-                    <select
-                      name="status"
-                      className="form-control"
-                      value={formData.status}
-                      onChange={handleInputChange}
-                      required
-                    >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-outline" onClick={resetForm}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editingId ? 'Save Changes' : 'Register Farmer'}</button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+          
+          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+            <Button variant="outlined" onClick={resetForm}>Cancel</Button>
+            <Button type="submit" variant="primary">{editingId ? 'Save Changes' : 'Register Farmer'}</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 };

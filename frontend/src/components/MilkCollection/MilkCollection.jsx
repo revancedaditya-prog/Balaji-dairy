@@ -1,20 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { supplierService, milkEntryService, rateChartService } from '../../services/api';
+import { milkEntryService, supplierService } from '../../services/api';
 import * as XLSX from 'xlsx';
+import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
 
 const MilkCollection = () => {
-  // Collection Entries State
-  const [entries, setEntries] = useState([]);
-  const [loadingList, setLoadingList] = useState(true);
-
-  // Filters State
-  const [filterCode, setFilterCode] = useState('');
-  const [filterName, setFilterName] = useState('');
-  const [filterShift, setFilterShift] = useState('');
-  const [filterVillage, setFilterVillage] = useState('');
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-
   // Form State
   const [supplierCode, setSupplierCode] = useState('');
   const [supplierName, setSupplierName] = useState('');
@@ -25,93 +14,107 @@ const MilkCollection = () => {
   const [remarks, setRemarks] = useState('');
 
   // Time & Shift Detect
-  const [customDateTime, setCustomDateTime] = useState(false);
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
-  const [entryTime, setEntryTime] = useState(new Date().toLocaleTimeString('en-IN', { hour12: false }).substring(0, 8));
-  const [shift, setShift] = useState('Morning');
+  const getISTDateTime = () => {
+    const d = new Date();
+    // UTC offset for IST is +5.5 hours
+    const localTime = d.getTime() + (d.getTimezoneOffset() * 60000);
+    const istTime = new Date(localTime + (3600000 * 5.5));
+    
+    const dateStr = istTime.toISOString().split('T')[0];
+    const timeStr = istTime.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+    return { dateStr, timeStr };
+  };
 
+  const detectShift = (timeString) => {
+    const hour = parseInt(timeString.split(':')[0], 10);
+    // Morning shift is typically before 2 PM (14:00)
+    return hour < 14 ? 'Morning' : 'Evening';
+  };
+
+  const initDateTime = getISTDateTime();
+  const [entryDate, setEntryDate] = useState(initDateTime.dateStr);
+  const [entryTime, setEntryTime] = useState(initDateTime.timeStr);
+  const [shift, setShift] = useState(detectShift(initDateTime.timeStr));
+  const [customDateTime, setCustomDateTime] = useState(false);
+
+  // Filters State
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [filterShift, setFilterShift] = useState('');
+  const [filterCode, setFilterCode] = useState('');
+  const [filterName, setFilterName] = useState('');
+  const [filterVillage, setFilterVillage] = useState('');
+
+  // Data Listing State
+  const [entries, setEntries] = useState([]);
+  const [loadingList, setLoadingList] = useState(true);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
-  const [listError, setListError] = useState('');
 
-  // Auto-detect shift on time change
-  const autoDetectShift = (timeStr) => {
+  // Live calculated fields
+  const calculatedRate = (quantity && amount) 
+    ? (parseFloat(amount) / parseFloat(quantity)).toFixed(2) 
+    : '0.00';
+
+  // Live Look up on code entry
+  const handleCodeBlur = async () => {
+    if (!supplierCode) return;
+    setFormError('');
     try {
-      const hour = parseInt(timeStr.split(':')[0], 10);
-      if (hour >= 4 && hour < 12) {
-        setShift('Morning');
+      const res = await supplierService.getSuppliers({ search: supplierCode });
+      if (res.success && res.data.length > 0) {
+        // Exact match check
+        const match = res.data.find(s => s.supplierCode === parseInt(supplierCode, 10));
+        if (match) {
+          if (match.status !== 'active') {
+            setFormError(`Supplier #${supplierCode} is INACTIVE`);
+            setSupplierName('');
+          } else {
+            setSupplierName(match.supplierName);
+          }
+        } else {
+          setSupplierName('');
+          setFormError(`Supplier Code #${supplierCode} not registered`);
+        }
       } else {
-        setShift('Evening');
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // Clock effect to keep date/time live unless user overrides
-  useEffect(() => {
-    if (customDateTime) return;
-
-    const timer = setInterval(() => {
-      const dateObj = new Date();
-      // Format YYYY-MM-DD
-      const dateStr = dateObj.toISOString().split('T')[0];
-      const timeStr = dateObj.toTimeString().split(' ')[0]; // HH:MM:SS
-      setEntryDate(dateStr);
-      setEntryTime(timeStr);
-      autoDetectShift(timeStr);
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [customDateTime]);
-
-  // Lookup Supplier Name when code is entered
-  const lookupSupplier = async (code) => {
-    if (!code) {
-      setSupplierName('');
-      return;
-    }
-    try {
-      const res = await supplierService.getSupplierByCode(code);
-      if (res.success) {
-        setSupplierName(res.data.supplierName);
-        setFormError('');
+        setSupplierName('');
+        setFormError(`Supplier Code #${supplierCode} not registered`);
       }
     } catch (err) {
-      setSupplierName('');
-      setFormError(`Farmer Code #${code} not found or inactive`);
+      console.error('Supplier lookup error:', err);
     }
   };
 
-  // Trigger lookup on blur or when code length exceeds threshold
-  const handleCodeBlur = () => {
-    lookupSupplier(supplierCode);
-  };
+  // Sync date/time if not custom
+  useEffect(() => {
+    if (!customDateTime) {
+      const timer = setInterval(() => {
+        const ist = getISTDateTime();
+        setEntryDate(ist.dateStr);
+        setEntryTime(ist.timeStr);
+        setShift(detectShift(ist.timeStr));
+      }, 30000); // Check every 30s
+      return () => clearInterval(timer);
+    }
+  }, [customDateTime]);
 
-  const handleQuantityChange = (qtyVal) => {
-    setQuantity(qtyVal);
-  };
-
-  // Load collection logs
   const loadEntries = async () => {
     try {
       setLoadingList(true);
-      setListError('');
       const filters = {
         startDate,
         endDate,
+        shift: filterShift,
         supplierCode: filterCode,
         supplierName: filterName,
-        shift: filterShift,
-        village: filterVillage,
+        village: filterVillage
       };
       const res = await milkEntryService.getEntries(filters);
       if (res.success) {
         setEntries(res.data);
       }
     } catch (err) {
-      setListError('Failed to fetch milk collection logs');
-      console.error(err);
+      console.error('Failed to load milk entries:', err);
     } finally {
       setLoadingList(false);
     }
@@ -128,7 +131,7 @@ const MilkCollection = () => {
     setFormSuccess('');
 
     if (!supplierCode || !supplierName || !quantity || !amount) {
-      setFormError('Please fill in Supplier Code, Quantity and Amount');
+      setFormError('Please enter Supplier Code, Quantity and Amount');
       return;
     }
 
@@ -193,11 +196,10 @@ const MilkCollection = () => {
     const worksheet = XLSX.utils.json_to_sheet(formattedData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Milk_Entries');
-
     XLSX.writeFile(workbook, `Milk_Collection_${startDate}_to_${endDate}.xlsx`);
   };
 
-  // PDF Export using Browser Print Page formatting
+  // PDF Export
   const exportToPDF = () => {
     const totalQty = entries.reduce((sum, e) => sum + e.milkQuantity, 0);
     const totalAmt = entries.reduce((sum, e) => sum + e.amount, 0);
@@ -267,326 +269,308 @@ const MilkCollection = () => {
   };
 
   return (
-    <div className="collection-view">
-      <div className="view-header">
-        <div>
-          <h1>Milk Collection Entry</h1>
-          <p className="text-muted">Record daily morning and evening milk collection batches</p>
-        </div>
-      </div>
+    <div className="collection-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
+      <div className="grid grid-cols-3" style={{ gap: '1rem', alignItems: 'start' }}>
+        {/* Entry Screen (Handheld style) */}
+        <div style={{ gridColumn: 'span 1' }}>
+          <Card style={{ padding: '1.25rem' }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: '600', marginBottom: '1rem', borderBottom: '1px solid var(--md-sys-color-surface-variant)', paddingBottom: '0.5rem' }}>
+              Collection Desk
+            </h3>
 
-      <div className="grid grid-cols-3" style={{ gap: '1.5rem', alignItems: 'start' }}>
-        {/* Entry Screen */}
-        <div className="card" style={{ gridColumn: 'span 1' }}>
-          <h3 style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
-            New Entry Form
-          </h3>
+            {formError && <div className="error-alert" style={{ marginBottom: '1rem' }}>{formError}</div>}
+            {formSuccess && <div className="success-alert" style={{ marginBottom: '1rem' }}>{formSuccess}</div>}
 
-          {formError && <div className="error-alert" style={{ marginBottom: '1rem' }}>{formError}</div>}
-          {formSuccess && <div className="success-alert" style={{ marginBottom: '1rem' }}>{formSuccess}</div>}
-
-          <form onSubmit={handleSubmitEntry}>
-            <div className="form-group">
-              <label className="form-label">Supplier Code*</label>
-              <input
+            <form onSubmit={handleSubmitEntry}>
+              <Input
+                label="Supplier Code (Press Tab / Blur to look up)*"
                 type="number"
-                className="form-control"
-                placeholder="Type farmer code & press Tab"
+                inputMode="numeric"
+                placeholder="Farmer numeric code"
                 value={supplierCode}
                 onChange={(e) => {
                   setSupplierCode(e.target.value);
-                  setSupplierName(''); // Reset name until look up runs
+                  setSupplierName('');
                 }}
                 onBlur={handleCodeBlur}
                 required
               />
-            </div>
 
-            <div className="form-group">
-              <label className="form-label">Supplier Name</label>
-              <input
+              <Input
+                label="Supplier Name"
                 type="text"
-                className="form-control"
                 value={supplierName}
                 readOnly
                 placeholder="Farmer name auto-fills"
-                style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed', fontWeight: '500' }}
+                style={{ opacity: 0.85 }}
               />
-            </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-              <div style={{ flex: 1 }}>
-                <label className="form-label">Date</label>
-                <input
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <Input
+                  label="Date"
                   type="date"
-                  className="form-control"
                   value={entryDate}
                   onChange={(e) => {
-                    setCustomDateTime(true);
                     setEntryDate(e.target.value);
+                    setCustomDateTime(true);
                   }}
+                  className="flex-1"
                 />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="form-label">Time</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <Input
+                  label="Time"
+                  type="time"
                   value={entryTime}
                   onChange={(e) => {
-                    setCustomDateTime(true);
                     setEntryTime(e.target.value);
-                    autoDetectShift(e.target.value);
+                    setCustomDateTime(true);
                   }}
+                  className="flex-1"
                 />
               </div>
-            </div>
 
-            <div className="form-group">
-              <label className="form-label">Shift</label>
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <input
-                    type="radio"
-                    name="shift"
-                    checked={shift === 'Morning'}
-                    onChange={() => {
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                <div style={{ flex: 1 }}>
+                  <label className="input-md3-label">Shift</label>
+                  <select 
+                    className="input-md3-control" 
+                    value={shift} 
+                    onChange={(e) => {
+                      setShift(e.target.value);
                       setCustomDateTime(true);
-                      setShift('Morning');
                     }}
-                  />
-                  Morning
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <input
-                    type="radio"
-                    name="shift"
-                    checked={shift === 'Evening'}
-                    onChange={() => {
-                      setCustomDateTime(true);
-                      setShift('Evening');
-                    }}
-                  />
-                  Evening
-                </label>
+                  >
+                    <option value="Morning">Morning</option>
+                    <option value="Evening">Evening</option>
+                  </select>
+                </div>
+                {customDateTime && (
+                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <Button variant="outlined" onClick={() => setCustomDateTime(false)} style={{ height: '48px', fontSize: '0.75rem', padding: '0 0.5rem' }}>
+                      Auto Live
+                    </Button>
+                  </div>
+                )}
               </div>
-            </div>
 
-            <div className="form-group">
-              <label className="form-label">Milk Quantity (Liters)*</label>
-              <input
-                type="number"
-                step="0.1"
-                className="form-control"
-                placeholder="Liters quantity"
-                value={quantity}
-                onChange={(e) => handleQuantityChange(e.target.value)}
-                required
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-              <div style={{ flex: 1 }}>
-                <label className="form-label">FAT (%)</label>
-                <input
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <Input
+                  label="Quantity (Liters)*"
                   type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  placeholder="e.g. 10.5"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  required
+                  className="flex-1"
+                />
+                <Input
+                  label="Total Amount (₹)*"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  placeholder="e.g. 500"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  required
+                  className="flex-1"
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <Input
+                  label="FAT (%)"
+                  type="number"
+                  inputMode="decimal"
                   step="0.1"
-                  className="form-control"
-                  placeholder="e.g. 6.5"
+                  placeholder="e.g. 4.5"
                   value={fat}
                   onChange={(e) => setFat(e.target.value)}
+                  className="flex-1"
                 />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="form-label">SNF (%)</label>
-                <input
+                <Input
+                  label="SNF (%)"
                   type="number"
+                  inputMode="decimal"
                   step="0.1"
-                  className="form-control"
-                  placeholder="e.g. 9.2"
+                  placeholder="e.g. 8.5"
                   value={snf}
                   onChange={(e) => setSnf(e.target.value)}
+                  className="flex-1"
                 />
               </div>
-            </div>
 
-            <div className="form-group">
-              <label className="form-label">Total Amount (₹)*</label>
-              <input
-                type="number"
-                step="0.01"
-                className="form-control"
-                placeholder="Total Amount in ₹"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                required
-              />
-            </div>
+              {/* Dynamic Rates Display */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                padding: '0.75rem 1rem',
+                backgroundColor: 'var(--md-sys-color-primary-container)',
+                color: 'var(--md-sys-color-on-primary-container)',
+                borderRadius: 'var(--md-shape-corner-medium)',
+                fontSize: '0.9rem',
+                fontWeight: '600',
+                marginBottom: '1.25rem'
+              }}>
+                <span>Calculated Rate:</span>
+                <span>₹ {calculatedRate} / Liter</span>
+              </div>
 
-            <div className="form-group">
-              <label className="form-label">Remarks</label>
-              <input
+              <Input
+                label="Remarks"
                 type="text"
-                className="form-control"
-                placeholder="Any special remarks"
+                placeholder="Optional notes..."
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
               />
-            </div>
 
-            <button type="submit" className="btn btn-primary btn-block">
-              Save Milk Entry
-            </button>
-            {customDateTime && (
-              <button
-                type="button"
-                className="btn btn-outline btn-block"
-                style={{ marginTop: '0.5rem' }}
-                onClick={() => setCustomDateTime(false)}
-              >
-                Reset to Auto Live Time
-              </button>
-            )}
-          </form>
+              <Button type="submit" variant="primary" style={{ width: '100%' }}>
+                Save Milk Entry
+              </Button>
+            </form>
+          </Card>
         </div>
 
         {/* Logs Listing */}
         <div style={{ gridColumn: 'span 2' }}>
-          <div className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-            <h3 style={{ marginBottom: '0.75rem' }}>Filters & Queries</h3>
+          <Card style={{ padding: '1rem', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.75rem' }}>Filters & Query</h3>
+            
             <div className="grid grid-cols-3" style={{ gap: '0.75rem' }}>
+              <Input label="Start Date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              <Input label="End Date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
               <div>
-                <label className="form-label">Start Date</label>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="form-label">End Date</label>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="form-label">Shift</label>
-                <select className="form-control" value={filterShift} onChange={(e) => setFilterShift(e.target.value)}>
+                <label className="input-md3-label">Shift</label>
+                <select className="input-md3-control" value={filterShift} onChange={(e) => setFilterShift(e.target.value)}>
                   <option value="">All Shifts</option>
                   <option value="Morning">Morning</option>
                   <option value="Evening">Evening</option>
                 </select>
               </div>
-              <div>
-                <label className="form-label">Supplier Code</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  placeholder="Code"
-                  value={filterCode}
-                  onChange={(e) => setFilterCode(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="form-label">Farmer Name</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Name"
-                  value={filterName}
-                  onChange={(e) => setFilterName(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="form-label">Village</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Village"
-                  value={filterVillage}
-                  onChange={(e) => setFilterVillage(e.target.value)}
-                />
-              </div>
+              <Input label="Farmer Code" type="number" placeholder="Code" value={filterCode} onChange={(e) => setFilterCode(e.target.value)} />
+              <Input label="Farmer Name" type="text" placeholder="Search name" value={filterName} onChange={(e) => setFilterName(e.target.value)} />
+              <Input label="Village" type="text" placeholder="Search village" value={filterVillage} onChange={(e) => setFilterVillage(e.target.value)} />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
-              <button className="btn btn-outline" onClick={exportToExcel}>
-                Export Excel
-              </button>
-              <button className="btn btn-outline" onClick={exportToPDF}>
-                Print Statement
-              </button>
-            </div>
-          </div>
 
-          <div className="table-container">
-            {loadingList ? (
-              <div className="table-loading">
-                <div className="spinner"></div>
-                <span>Filtering entries...</span>
-              </div>
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Farmer</th>
-                    <th>Date / Time</th>
-                    <th>Shift</th>
-                    <th>Qty</th>
-                    <th>FAT/SNF</th>
-                    <th>Amount</th>
-                    <th style={{ textAlign: 'right' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.length > 0 ? (
-                    entries.map((e) => (
-                      <tr key={e._id}>
-                        <td>
-                          <b>#{e.supplierCode}</b>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {e.supplierName}
-                          </div>
-                        </td>
-                        <td>
-                          {e.date}
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
-                            {e.time}
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`badge badge-${e.shift.toLowerCase()}`}>
-                            {e.shift}
-                          </span>
-                        </td>
-                        <td>{e.milkQuantity} L</td>
-                        <td>{e.fat}% / {e.snf}%</td>
-                        <td style={{ fontWeight: '600' }}>₹{e.amount}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button
-                            className="btn btn-danger"
-                            style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }}
-                            onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
-                          >
-                            Delete
-                          </button>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
+              <Button variant="outlined" onClick={exportToExcel} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Export Excel</Button>
+              <Button variant="outlined" onClick={exportToPDF} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Print PDF</Button>
+            </div>
+          </Card>
+
+          <Card style={{ padding: '1rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem' }}>Milk Collection Log</h3>
+
+            <div className="table-container desktop-only">
+              {loadingList ? (
+                <Loading label="Filtering entries..." />
+              ) : (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Farmer</th>
+                      <th>Date / Time</th>
+                      <th>Shift</th>
+                      <th>Qty</th>
+                      <th>FAT/SNF</th>
+                      <th>Amount</th>
+                      <th style={{ textAlign: 'right' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.length > 0 ? (
+                      entries.map((e) => (
+                        <tr key={e._id}>
+                          <td>
+                            <b>#{e.supplierCode}</b>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                              {e.supplierName}
+                            </div>
+                          </td>
+                          <td>
+                            {e.date}
+                            <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                              {e.time}
+                            </div>
+                          </td>
+                          <td>
+                            <Badge type={e.shift === 'Morning' ? 'primary' : 'success'}>
+                              {e.shift}
+                            </Badge>
+                          </td>
+                          <td>{e.milkQuantity} L</td>
+                          <td>{e.fat}% / {e.snf}%</td>
+                          <td style={{ fontWeight: '600' }}>₹{e.amount}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            <Button
+                              variant="danger"
+                              style={{ padding: '0.2rem 0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
+                              onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
+                            >
+                              Delete
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="7" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
+                          No milk collection records match the filter query.
                         </td>
                       </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-light)', padding: '2rem' }}>
-                        No milk collection records match the filter query.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Mobile View Card List */}
+            <div className="mobile-card-list mobile-only">
+              {loadingList ? (
+                <Loading label="Filtering entries..." />
+              ) : entries.length > 0 ? (
+                entries.map((e) => (
+                  <div key={e._id} className="mobile-row-card">
+                    <div className="mobile-row-card-header">
+                      <div className="mobile-row-card-title">#{e.supplierCode} - {e.supplierName}</div>
+                      <Badge type={e.shift === 'Morning' ? 'primary' : 'success'}>
+                        {e.shift}
+                      </Badge>
+                    </div>
+                    <div className="mobile-row-card-body">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                        <span>Liters Collected:</span>
+                        <span style={{ fontWeight: '600' }}>{e.milkQuantity} L</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                        <span>FAT / SNF:</span>
+                        <span>{e.fat}% / {e.snf}%</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                        <span>Date / Time:</span>
+                        <span>{e.date} • {e.time}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', borderTop: '1px dashed var(--md-sys-color-surface-variant)', paddingTop: '0.25rem' }}>
+                        <span style={{ fontWeight: '600' }}>Total Amount:</span>
+                        <span style={{ fontWeight: '700', color: 'var(--md-sys-color-primary)', fontSize: '0.95rem' }}>₹{e.amount}</span>
+                      </div>
+                    </div>
+                    <div className="mobile-row-card-actions">
+                      <Button
+                        variant="danger"
+                        style={{ padding: '0.2rem 0.5rem', minHeight: '36px', fontSize: '0.8rem' }}
+                        onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
+                      >
+                        Delete Entry
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <EmptyState message="No milk collection records match the filter query" />
+              )}
+            </div>
+          </Card>
         </div>
       </div>
     </div>
