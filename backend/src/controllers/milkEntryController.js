@@ -1,279 +1,197 @@
 const MilkEntry = require('../models/MilkEntry');
 const Supplier = require('../models/Supplier');
-const RateChart = require('../models/RateChart');
 const logAudit = require('../utils/auditLogger');
 
-// Helper to get current Indian standard date and time
 const getISTDateTime = () => {
-  const dateObj = new Date();
-  // Format YYYY-MM-DD
-  const offset = 5.5 * 60 * 60 * 1000; // IST is UTC + 5:30
-  const istDate = new Date(dateObj.getTime() + offset);
-  const dateStr = istDate.toISOString().split('T')[0];
-  const timeStr = istDate.toISOString().split('T')[1].substring(0, 8);
-  return { dateStr, timeStr };
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const value = (type) => parts.find((p) => p.type === type)?.value;
+  return {
+    dateStr: `${value('year')}-${value('month')}-${value('day')}`,
+    timeStr: `${value('hour')}:${value('minute')}:${value('second')}`,
+  };
 };
 
-// Helper to detect shift
 const detectShift = (timeStr) => {
   const hour = parseInt(timeStr.split(':')[0], 10);
-  if (hour >= 4 && hour < 12) {
-    return 'Morning';
-  } else {
-    return 'Evening';
-  }
+  return hour >= 4 && hour < 12 ? 'Morning' : 'Evening';
 };
 
-// Helper to look up rate
-const getRate = async (fat, snf) => {
-  const rFat = Math.round(fat * 10) / 10;
-  const rSnf = Math.round(snf * 10) / 10;
-  const entry = await RateChart.findOne({ fat: rFat, snf: rSnf });
-  return entry ? entry.rate : 0;
+const parsePositiveNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
-// @desc    Add new milk entry
-// @route   POST /api/milk-entries
-// @access  Private
+const parseOptionalNumber = (value) => {
+  if (value === undefined || value === null || value === '') return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
 exports.addEntry = async (req, res) => {
-  const {
-    supplierCode,
-    milkQuantity,
-    fat,
-    snf,
-    remarks,
-  } = req.body;
-
-  let { date, time, shift, rate } = req.body;
+  const { supplierCode, remarks } = req.body;
+  let { date, time, shift } = req.body;
 
   try {
-    if (!supplierCode || !milkQuantity || req.body.amount === undefined || req.body.amount === null) {
-      return res.status(400).json({ success: false, message: 'Please provide supplierCode, milkQuantity, and total amount' });
+    const quantity = parsePositiveNumber(req.body.milkQuantity);
+    const amount = parsePositiveNumber(req.body.amount);
+    const fat = parseOptionalNumber(req.body.fat);
+    const snf = parseOptionalNumber(req.body.snf);
+    const code = Number(supplierCode);
+
+    if (!Number.isInteger(code) || code <= 0 || !quantity || !amount || fat === null || snf === null) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid supplier code, positive milk quantity/amount, and non-negative FAT/SNF' });
     }
 
-    // Auto fetch supplier details
-    const supplier = await Supplier.findOne({ supplierCode });
-    if (!supplier) {
-      return res.status(404).json({ success: false, message: `Supplier Code #${supplierCode} does not exist` });
-    }
+    const supplier = await Supplier.findOne({ supplierCode: code });
+    if (!supplier) return res.status(404).json({ success: false, message: `Supplier Code #${code} does not exist` });
+    if (supplier.status !== 'active') return res.status(400).json({ success: false, message: `Supplier #${code} is inactive` });
 
-    if (supplier.status !== 'active') {
-      return res.status(400).json({ success: false, message: `Supplier #${supplierCode} is inactive` });
-    }
-
-    // Auto fill date & time if not provided
     const ist = getISTDateTime();
     if (!date) date = ist.dateStr;
     if (!time) time = ist.timeStr;
-
-    // Auto detect shift
-    if (!shift) {
-      shift = detectShift(time);
+    if (!shift) shift = detectShift(time);
+    if (!['Morning', 'Evening'].includes(shift)) {
+      return res.status(400).json({ success: false, message: 'Invalid shift' });
     }
 
-    const fFat = fat !== undefined && fat !== null ? parseFloat(fat) : 0;
-    const fSnf = snf !== undefined && snf !== null ? parseFloat(snf) : 0;
-    const fAmount = parseFloat(req.body.amount);
-    const fRate = Math.round((fAmount / milkQuantity) * 100) / 100;
-
+    const rate = Math.round((amount / quantity) * 100) / 100;
     const newEntry = await MilkEntry.create({
-      supplierCode,
+      supplierCode: code,
       supplierName: supplier.supplierName,
       date,
       time,
       shift,
-      milkQuantity,
-      fat: fFat,
-      snf: fSnf,
-      rate: fRate,
-      amount: fAmount,
-      remarks,
+      milkQuantity: quantity,
+      fat,
+      snf,
+      rate,
+      amount,
+      remarks: remarks || '',
       createdBy: req.user._id,
     });
 
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'MILK_ENTRY_ADD',
-      `Milk Entry for Supplier #${supplierCode} (${shift} - ${date})`,
-      null,
-      newEntry
-    );
-
-    res.status(201).json({ success: true, data: newEntry });
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'MILK_ENTRY_ADD', `Milk Entry for Supplier #${code} (${shift} - ${date})`, null, newEntry);
+    return res.status(201).json({ success: true, data: newEntry });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Add milk entry failed:', error);
+    return res.status(500).json({ success: false, message: 'Failed to save milk entry' });
   }
 };
 
-// @desc    Get milk entries with advanced filters & search
-// @route   GET /api/milk-entries
-// @access  Private
 exports.getEntries = async (req, res) => {
-  const {
-    startDate,
-    endDate,
-    supplierCode,
-    supplierName,
-    shift,
-    village,
-    minFat,
-    maxFat,
-    minRate,
-    maxRate,
-  } = req.query;
-
+  const { startDate, endDate, supplierCode, supplierName, shift, village, minFat, maxFat, minRate, maxRate } = req.query;
   try {
-    let query = {};
-
-    // Date range filter
+    const query = {};
     if (startDate || endDate) {
       query.date = {};
       if (startDate) query.date.$gte = startDate;
       if (endDate) query.date.$lte = endDate;
     }
-
-    // Shift filter
-    if (shift) {
-      query.shift = shift;
-    }
-
-    // Supplier Code filter
+    if (shift) query.shift = shift;
     if (supplierCode) {
-      query.supplierCode = parseInt(supplierCode, 10);
+      const code = Number(supplierCode);
+      if (!Number.isInteger(code)) return res.status(400).json({ success: false, message: 'Invalid supplier code' });
+      query.supplierCode = code;
     }
-
-    // Supplier Name filter (text match)
-    if (supplierName) {
-      query.supplierName = new RegExp(supplierName, 'i');
-    }
-
-    // Fat range filter
+    if (supplierName) query.supplierName = new RegExp(supplierName, 'i');
     if (minFat || maxFat) {
       query.fat = {};
-      if (minFat) query.fat.$gte = parseFloat(minFat);
-      if (maxFat) query.fat.$lte = parseFloat(maxFat);
+      if (minFat) query.fat.$gte = Number(minFat);
+      if (maxFat) query.fat.$lte = Number(maxFat);
     }
-
-    // Rate range filter
     if (minRate || maxRate) {
       query.rate = {};
-      if (minRate) query.rate.$gte = parseFloat(minRate);
-      if (maxRate) query.rate.$lte = parseFloat(maxRate);
+      if (minRate) query.rate.$gte = Number(minRate);
+      if (maxRate) query.rate.$lte = Number(maxRate);
     }
-
-    // Village filter (milk entries don't store village directly, so we find matching supplier codes)
     if (village) {
-      const suppliersInVillage = await Supplier.find({
-        village: new RegExp(village, 'i'),
-      }).select('supplierCode');
-
-      const codes = suppliersInVillage.map((s) => s.supplierCode);
-      query.supplierCode = { $in: codes };
+      const suppliers = await Supplier.find({ village: new RegExp(village, 'i') }).select('supplierCode');
+      const codes = suppliers.map((s) => s.supplierCode);
+      query.supplierCode = query.supplierCode ? { $in: codes.filter((c) => c === query.supplierCode) } : { $in: codes };
     }
 
     const entries = await MilkEntry.find(query).sort({ date: -1, time: -1 });
-    res.status(200).json({ success: true, count: entries.length, data: entries });
+    return res.status(200).json({ success: true, count: entries.length, data: entries });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to load milk entries' });
   }
 };
 
-// @desc    Get single milk entry
-// @route   GET /api/milk-entries/:id
-// @access  Private
 exports.getEntryById = async (req, res) => {
   try {
     const entry = await MilkEntry.findById(req.params.id);
-    if (!entry) {
-      return res.status(404).json({ success: false, message: 'Milk entry not found' });
-    }
-    res.status(200).json({ success: true, data: entry });
+    if (!entry) return res.status(404).json({ success: false, message: 'Milk entry not found' });
+    return res.status(200).json({ success: true, data: entry });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(400).json({ success: false, message: 'Invalid milk entry id' });
   }
 };
 
-// @desc    Update milk entry
-// @route   PUT /api/milk-entries/:id
-// @access  Private
 exports.updateEntry = async (req, res) => {
-  const { milkQuantity, fat, snf, date, time, shift, remarks } = req.body;
-  let { rate } = req.body;
-
   try {
     const entry = await MilkEntry.findById(req.params.id);
-    if (!entry) {
-      return res.status(404).json({ success: false, message: 'Milk entry not found' });
-    }
-
+    if (!entry) return res.status(404).json({ success: false, message: 'Milk entry not found' });
     const oldValue = entry.toObject();
 
-    // Check supplier info if code updated (not standard but supported)
-    if (req.body.supplierCode && req.body.supplierCode !== entry.supplierCode) {
-      const supplier = await Supplier.findOne({ supplierCode: req.body.supplierCode });
-      if (!supplier) {
-        return res.status(404).json({ success: false, message: `Supplier Code #${req.body.supplierCode} does not exist` });
-      }
+    if (req.body.supplierCode !== undefined && Number(req.body.supplierCode) !== entry.supplierCode) {
+      const code = Number(req.body.supplierCode);
+      const supplier = await Supplier.findOne({ supplierCode: code });
+      if (!supplier || supplier.status !== 'active') return res.status(400).json({ success: false, message: 'Supplier does not exist or is inactive' });
       entry.supplierCode = supplier.supplierCode;
       entry.supplierName = supplier.supplierName;
     }
 
-    if (date) entry.date = date;
-    if (time) entry.time = time;
-    if (shift) entry.shift = shift;
-    if (remarks !== undefined) entry.remarks = remarks;
+    if (req.body.date) entry.date = req.body.date;
+    if (req.body.time) entry.time = req.body.time;
+    if (req.body.shift) {
+      if (!['Morning', 'Evening'].includes(req.body.shift)) return res.status(400).json({ success: false, message: 'Invalid shift' });
+      entry.shift = req.body.shift;
+    }
+    if (req.body.remarks !== undefined) entry.remarks = req.body.remarks;
 
-    // Update fields
-    if (milkQuantity !== undefined) entry.milkQuantity = parseFloat(milkQuantity);
-    if (fat !== undefined) entry.fat = parseFloat(fat);
-    if (snf !== undefined) entry.snf = parseFloat(snf);
-    if (req.body.amount !== undefined && req.body.amount !== null) {
-      entry.amount = parseFloat(req.body.amount);
+    if (req.body.milkQuantity !== undefined) {
+      const value = parsePositiveNumber(req.body.milkQuantity);
+      if (!value) return res.status(400).json({ success: false, message: 'Milk quantity must be greater than zero' });
+      entry.milkQuantity = value;
+    }
+    if (req.body.amount !== undefined) {
+      const value = parsePositiveNumber(req.body.amount);
+      if (!value) return res.status(400).json({ success: false, message: 'Amount must be greater than zero' });
+      entry.amount = value;
+    }
+    if (req.body.fat !== undefined) {
+      const value = parseOptionalNumber(req.body.fat);
+      if (value === null) return res.status(400).json({ success: false, message: 'FAT cannot be negative' });
+      entry.fat = value;
+    }
+    if (req.body.snf !== undefined) {
+      const value = parseOptionalNumber(req.body.snf);
+      if (value === null) return res.status(400).json({ success: false, message: 'SNF cannot be negative' });
+      entry.snf = value;
     }
 
-    // Recalculate rate based on updated amount and quantity
     entry.rate = Math.round((entry.amount / entry.milkQuantity) * 100) / 100;
-
     const updatedEntry = await entry.save();
-
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'MILK_ENTRY_EDIT',
-      `Milk Entry for Supplier #${entry.supplierCode} (${entry.shift} - ${entry.date})`,
-      oldValue,
-      updatedEntry
-    );
-
-    res.status(200).json({ success: true, data: updatedEntry });
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'MILK_ENTRY_EDIT', `Milk Entry for Supplier #${entry.supplierCode} (${entry.shift} - ${entry.date})`, oldValue, updatedEntry);
+    return res.status(200).json({ success: true, data: updatedEntry });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Update milk entry failed:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update milk entry' });
   }
 };
 
-// @desc    Delete milk entry
-// @route   DELETE /api/milk-entries/:id
-// @access  Private
 exports.deleteEntry = async (req, res) => {
   try {
     const entry = await MilkEntry.findById(req.params.id);
-    if (!entry) {
-      return res.status(404).json({ success: false, message: 'Milk entry not found' });
-    }
-
+    if (!entry) return res.status(404).json({ success: false, message: 'Milk entry not found' });
     const oldValue = entry.toObject();
-
     await entry.deleteOne();
-
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'MILK_ENTRY_DELETE',
-      `Milk Entry for Supplier #${entry.supplierCode} (${entry.shift} - ${entry.date})`,
-      oldValue,
-      null
-    );
-
-    res.status(200).json({ success: true, message: 'Milk entry deleted successfully' });
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'MILK_ENTRY_DELETE', `Milk Entry for Supplier #${entry.supplierCode} (${entry.shift} - ${entry.date})`, oldValue, null);
+    return res.status(200).json({ success: true, message: 'Milk entry deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to delete milk entry' });
   }
 };
