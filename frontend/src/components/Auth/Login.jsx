@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Milk, Phone, LockKeyhole, UserRound, Database } from 'lucide-react';
+import { Milk, Phone, LockKeyhole, UserRound, Database, KeyRound } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import supabase from '../../lib/supabase';
 
@@ -8,15 +8,25 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [setupMode, setSetupMode] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
+  const [resetStep, setResetStep] = useState('phone');
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState('');
   const [success, setSuccess] = useState('');
   const [setupLoading, setSetupLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const { login, loading } = useAuth();
+
+  const clearMessages = () => {
+    setLocalError('');
+    setSuccess('');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLocalError('');
-    setSuccess('');
+    clearMessages();
     if (!phone || !password) return setLocalError('Please fill in phone number and password');
 
     if (setupMode) {
@@ -39,7 +49,124 @@ const Login = () => {
     if (!res.success) setLocalError(res.message || 'Login failed. Please check credentials.');
   };
 
-  const busy = loading || setupLoading;
+  const startReset = async (e) => {
+    e.preventDefault();
+    clearMessages();
+    if (!phone.trim()) return setLocalError('Enter your registered mobile number');
+    try {
+      setResetLoading(true);
+      await supabase.auth.sendPasswordResetOtp(phone.trim());
+      setResetStep('otp');
+      setSuccess('OTP sent to your registered mobile number.');
+    } catch (err) {
+      const message = err.message || 'Could not send OTP';
+      if (/provider|sms|phone/i.test(message)) {
+        setLocalError('SMS/Phone provider is not configured in Supabase yet. Enable a Phone provider to use OTP password reset.');
+      } else {
+        setLocalError(message);
+      }
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const verifyOtp = async (e) => {
+    e.preventDefault();
+    clearMessages();
+    if (!otp.trim()) return setLocalError('Enter the OTP');
+    try {
+      setResetLoading(true);
+      await supabase.auth.verifyPasswordResetOtp({ phone: phone.trim(), token: otp.trim() });
+      setResetStep('password');
+      setSuccess('OTP verified. Create your new password.');
+    } catch (err) {
+      setLocalError(err.message || 'Invalid or expired OTP');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const finishReset = async (e) => {
+    e.preventDefault();
+    clearMessages();
+    if (newPassword.length < 6) return setLocalError('Password must be at least 6 characters');
+    if (newPassword !== confirmPassword) return setLocalError('Passwords do not match');
+    try {
+      setResetLoading(true);
+      await supabase.auth.updatePassword(newPassword);
+      await supabase.auth.signOut();
+      setPassword('');
+      setOtp('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setResetMode(false);
+      setResetStep('phone');
+      setSuccess('Password changed successfully. Login with your new password.');
+    } catch (err) {
+      setLocalError(err.message || 'Could not update password');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const busy = loading || setupLoading || resetLoading;
+
+  if (resetMode) {
+    return (
+      <div className="login-container">
+        <div className="login-card">
+          <div className="login-header">
+            <div className="brand-logo"><KeyRound size={30} strokeWidth={2.2} /></div>
+            <h1>Reset Password</h1>
+            <p>Verify your registered mobile number with OTP</p>
+          </div>
+
+          {localError && <div className="error-alert" style={{marginBottom:'12px'}}>{localError}</div>}
+          {success && <div className="success-alert" style={{marginBottom:'12px'}}>{success}</div>}
+
+          {resetStep === 'phone' && (
+            <form onSubmit={startReset} className="login-form">
+              <div className="form-group">
+                <label className="form-label">Registered Mobile Number</label>
+                <div className="input-with-icon">
+                  <Phone size={18} className="input-icon" />
+                  <input type="tel" inputMode="numeric" className="form-control" placeholder="10-digit mobile number" value={phone} onChange={(e)=>setPhone(e.target.value)} required />
+                </div>
+              </div>
+              <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={busy}>{busy ? 'Sending OTP...' : 'Send OTP'}</button>
+            </form>
+          )}
+
+          {resetStep === 'otp' && (
+            <form onSubmit={verifyOtp} className="login-form">
+              <div className="form-group">
+                <label className="form-label">OTP</label>
+                <input type="text" inputMode="numeric" className="form-control" placeholder="Enter OTP" value={otp} onChange={(e)=>setOtp(e.target.value)} required />
+              </div>
+              <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={busy}>{busy ? 'Verifying...' : 'Verify OTP'}</button>
+              <button type="button" className="btn btn-block" style={{marginTop:'8px'}} onClick={startReset} disabled={busy}>Resend OTP</button>
+            </form>
+          )}
+
+          {resetStep === 'password' && (
+            <form onSubmit={finishReset} className="login-form">
+              <div className="form-group">
+                <label className="form-label">New Password</label>
+                <div className="input-with-icon"><LockKeyhole size={18} className="input-icon" /><input type="password" className="form-control" placeholder="Minimum 6 characters" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} minLength="6" required /></div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Confirm New Password</label>
+                <div className="input-with-icon"><LockKeyhole size={18} className="input-icon" /><input type="password" className="form-control" placeholder="Re-enter new password" value={confirmPassword} onChange={(e)=>setConfirmPassword(e.target.value)} minLength="6" required /></div>
+              </div>
+              <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={busy}>{busy ? 'Updating...' : 'Set New Password'}</button>
+            </form>
+          )}
+
+          <button type="button" onClick={()=>{setResetMode(false);setResetStep('phone');clearMessages();}} style={{width:'100%',marginTop:'14px',border:'none',background:'transparent',color:'#60707b',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>← Back to login</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="login-container">
@@ -90,7 +217,11 @@ const Login = () => {
           </button>
         </form>
 
-        <button type="button" onClick={()=>{setSetupMode(!setupMode);setLocalError('');setSuccess('');}} style={{width:'100%',marginTop:'14px',border:'none',background:'transparent',color:'#60707b',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>
+        {!setupMode && (
+          <button type="button" onClick={()=>{setResetMode(true);clearMessages();}} style={{width:'100%',marginTop:'12px',border:'none',background:'transparent',color:'#9a741f',fontSize:'12px',fontWeight:800,cursor:'pointer'}}>Forgot password? Reset with OTP</button>
+        )}
+
+        <button type="button" onClick={()=>{setSetupMode(!setupMode);clearMessages();}} style={{width:'100%',marginTop:'10px',border:'none',background:'transparent',color:'#60707b',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>
           {setupMode ? '← Back to login' : 'First time on Supabase? Set up owner'}
         </button>
       </div>
