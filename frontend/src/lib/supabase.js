@@ -79,6 +79,29 @@ export const supabaseLite = {
       setSession(data);
       return data;
     },
+    async sendPasswordResetOtp(phone) {
+      const normalizedPhone = normalizeIndianPhone(phone);
+      return request('/auth/v1/otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone: normalizedPhone, create_user: false }),
+      });
+    },
+    async verifyPasswordResetOtp({ phone, token }) {
+      const normalizedPhone = normalizeIndianPhone(phone);
+      const data = await request('/auth/v1/verify', {
+        method: 'POST',
+        body: JSON.stringify({ phone: normalizedPhone, token: String(token).trim(), type: 'sms' }),
+      });
+      setSession(data);
+      return data;
+    },
+    async updatePassword(password) {
+      const data = await request('/auth/v1/user', {
+        method: 'PUT',
+        body: JSON.stringify({ password }),
+      });
+      return data;
+    },
     async getUser() {
       const session = getSession();
       if (!session?.access_token) return null;
