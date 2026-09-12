@@ -1,256 +1,175 @@
 const Supplier = require('../models/Supplier');
+const MilkEntry = require('../models/MilkEntry');
+const Payment = require('../models/Payment');
 const logAudit = require('../utils/auditLogger');
 
-// @desc    Add a new supplier
-// @route   POST /api/suppliers
-// @access  Private
+const normalizeSupplier = (body) => ({
+  supplierCode: Number(body.supplierCode),
+  supplierName: typeof body.supplierName === 'string' ? body.supplierName.trim() : '',
+  fatherName: typeof body.fatherName === 'string' ? body.fatherName.trim() : '',
+  mobile: body.mobile == null ? '' : String(body.mobile).trim(),
+  village: typeof body.village === 'string' ? body.village.trim() : '',
+  status: body.status || 'active',
+  joiningDate: body.joiningDate || undefined,
+});
+
 exports.addSupplier = async (req, res) => {
-  const {
-    supplierCode,
-    supplierName,
-    fatherName,
-    mobile,
-    village,
-    status,
-    joiningDate,
-  } = req.body;
-
   try {
-    // Check if supplierCode already exists
-    const existing = await Supplier.findOne({ supplierCode });
-    if (existing) {
-      return res.status(400).json({ success: false, message: `Supplier Code #${supplierCode} is already registered` });
+    const data = normalizeSupplier(req.body);
+    if (!Number.isInteger(data.supplierCode) || data.supplierCode <= 0 || !data.supplierName || !data.village) {
+      return res.status(400).json({ success: false, message: 'Valid supplier code, name and village are required' });
     }
+    if (!['active', 'inactive'].includes(data.status)) return res.status(400).json({ success: false, message: 'Invalid supplier status' });
+    if (await Supplier.exists({ supplierCode: data.supplierCode })) return res.status(400).json({ success: false, message: `Supplier Code #${data.supplierCode} is already registered` });
 
-    const supplier = await Supplier.create({
-      supplierCode,
-      supplierName,
-      fatherName,
-      mobile,
-      village,
-      status,
-      joiningDate: joiningDate || new Date(),
-    });
-
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'SUPPLIER_ADD',
-      `Supplier Code #${supplierCode}`,
-      null,
-      supplier
-    );
-
-    res.status(201).json({ success: true, data: supplier });
+    const supplier = await Supplier.create(data);
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'SUPPLIER_ADD', `Supplier Code #${data.supplierCode}`, null, supplier);
+    return res.status(201).json({ success: true, data: supplier });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Add supplier failed:', error);
+    return res.status(500).json({ success: false, message: 'Failed to add supplier' });
   }
 };
 
-// @desc    Get all suppliers with filters & search
-// @route   GET /api/suppliers
-// @access  Private
 exports.getSuppliers = async (req, res) => {
   const { search, village, status } = req.query;
-
   try {
-    let query = {};
-
-    // Filter by status if provided
-    if (status) {
-      query.status = status;
-    }
-
-    // Filter by village if provided
-    if (village) {
-      query.village = new RegExp(village, 'i');
-    }
-
-    // Search query matching supplierCode or supplierName or village
+    const query = {};
+    if (status) query.status = status;
+    if (village) query.village = new RegExp(village, 'i');
     if (search) {
-      const searchNum = parseInt(search);
-      if (!isNaN(searchNum)) {
-        query.$or = [{ supplierCode: searchNum }];
-      } else {
-        query.$or = [
-          { supplierName: new RegExp(search, 'i') },
-          { village: new RegExp(search, 'i') },
-        ];
-      }
+      const trimmed = search.trim();
+      query.$or = /^\d+$/.test(trimmed)
+        ? [{ supplierCode: Number(trimmed) }]
+        : [{ supplierName: new RegExp(trimmed, 'i') }, { village: new RegExp(trimmed, 'i') }];
     }
-
     const suppliers = await Supplier.find(query).sort({ supplierCode: 1 });
-    res.status(200).json({ success: true, count: suppliers.length, data: suppliers });
+    return res.status(200).json({ success: true, count: suppliers.length, data: suppliers });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to load suppliers' });
   }
 };
 
-// @desc    Get single supplier details
-// @route   GET /api/suppliers/:id
-// @access  Private
 exports.getSupplierById = async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
-    if (!supplier) {
-      return res.status(404).json({ success: false, message: 'Supplier not found' });
-    }
-    res.status(200).json({ success: true, data: supplier });
+    if (!supplier) return res.status(404).json({ success: false, message: 'Supplier not found' });
+    return res.status(200).json({ success: true, data: supplier });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(400).json({ success: false, message: 'Invalid supplier id' });
   }
 };
 
-// @desc    Get supplier details by supplierCode
-// @route   GET /api/suppliers/code/:code
-// @access  Private
 exports.getSupplierByCode = async (req, res) => {
   try {
-    const supplier = await Supplier.findOne({ supplierCode: req.params.code });
-    if (!supplier) {
-      return res.status(404).json({ success: false, message: 'Supplier not found' });
-    }
-    res.status(200).json({ success: true, data: supplier });
+    const code = Number(req.params.code);
+    if (!Number.isInteger(code)) return res.status(400).json({ success: false, message: 'Invalid supplier code' });
+    const supplier = await Supplier.findOne({ supplierCode: code });
+    if (!supplier) return res.status(404).json({ success: false, message: 'Supplier not found' });
+    return res.status(200).json({ success: true, data: supplier });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to load supplier' });
   }
 };
 
-// @desc    Update supplier details
-// @route   PUT /api/suppliers/:id
-// @access  Private
 exports.updateSupplier = async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
-
-    if (!supplier) {
-      return res.status(404).json({ success: false, message: 'Supplier not found' });
-    }
-
-    // Capture old value for audit trail
+    if (!supplier) return res.status(404).json({ success: false, message: 'Supplier not found' });
     const oldValue = supplier.toObject();
 
-    // Check if supplierCode is updated and already exists
-    if (req.body.supplierCode && req.body.supplierCode !== supplier.supplierCode) {
-      const existing = await Supplier.findOne({ supplierCode: req.body.supplierCode });
-      if (existing) {
-        return res.status(400).json({ success: false, message: `Supplier Code #${req.body.supplierCode} is already registered` });
-      }
+    if (req.body.supplierCode !== undefined && Number(req.body.supplierCode) !== supplier.supplierCode) {
+      const newCode = Number(req.body.supplierCode);
+      if (!Number.isInteger(newCode) || newCode <= 0) return res.status(400).json({ success: false, message: 'Invalid supplier code' });
+      if (await Supplier.exists({ supplierCode: newCode })) return res.status(400).json({ success: false, message: `Supplier Code #${newCode} is already registered` });
+      const hasHistory = await Promise.any([
+        MilkEntry.exists({ supplierCode: supplier.supplierCode }).then(Boolean),
+        Payment.exists({ supplierCode: supplier.supplierCode }).then(Boolean),
+      ]).catch(() => false);
+      if (hasHistory) return res.status(409).json({ success: false, message: 'Supplier code cannot be changed after milk/payment history exists. Edit the other supplier details instead.' });
+      supplier.supplierCode = newCode;
     }
 
-    const updatedSupplier = await Supplier.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
+    if (req.body.supplierName !== undefined) {
+      const name = String(req.body.supplierName).trim();
+      if (!name) return res.status(400).json({ success: false, message: 'Supplier name is required' });
+      supplier.supplierName = name;
+    }
+    if (req.body.village !== undefined) {
+      const village = String(req.body.village).trim();
+      if (!village) return res.status(400).json({ success: false, message: 'Village is required' });
+      supplier.village = village;
+    }
+    if (req.body.fatherName !== undefined) supplier.fatherName = String(req.body.fatherName || '').trim();
+    if (req.body.mobile !== undefined) supplier.mobile = String(req.body.mobile || '').trim();
+    if (req.body.status !== undefined) {
+      if (!['active', 'inactive'].includes(req.body.status)) return res.status(400).json({ success: false, message: 'Invalid supplier status' });
+      supplier.status = req.body.status;
+    }
+    if (req.body.joiningDate !== undefined) supplier.joiningDate = req.body.joiningDate;
 
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'SUPPLIER_EDIT',
-      `Supplier Code #${updatedSupplier.supplierCode}`,
-      oldValue,
-      updatedSupplier
-    );
-
-    res.status(200).json({ success: true, data: updatedSupplier });
+    const updatedSupplier = await supplier.save();
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'SUPPLIER_EDIT', `Supplier Code #${updatedSupplier.supplierCode}`, oldValue, updatedSupplier);
+    return res.status(200).json({ success: true, data: updatedSupplier });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Update supplier failed:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update supplier' });
   }
 };
 
-// @desc    Delete supplier
-// @route   DELETE /api/suppliers/:id
-// @access  Private
 exports.deleteSupplier = async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
+    if (!supplier) return res.status(404).json({ success: false, message: 'Supplier not found' });
 
-    if (!supplier) {
-      return res.status(404).json({ success: false, message: 'Supplier not found' });
+    const [milkCount, paymentCount] = await Promise.all([
+      MilkEntry.countDocuments({ supplierCode: supplier.supplierCode }),
+      Payment.countDocuments({ supplierCode: supplier.supplierCode }),
+    ]);
+    if (milkCount > 0 || paymentCount > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Cannot delete Supplier #${supplier.supplierCode}: ${milkCount} milk entries and ${paymentCount} payments are linked. Mark the supplier inactive to preserve financial history.`,
+      });
     }
 
     const oldValue = supplier.toObject();
-
     await supplier.deleteOne();
-
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'SUPPLIER_DELETE',
-      `Supplier Code #${supplier.supplierCode}`,
-      oldValue,
-      null
-    );
-
-    res.status(200).json({ success: true, message: 'Supplier deleted successfully' });
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'SUPPLIER_DELETE', `Supplier Code #${supplier.supplierCode}`, oldValue, null);
+    return res.status(200).json({ success: true, message: 'Supplier deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to delete supplier' });
   }
 };
 
-// @desc    Bulk upload suppliers
-// @route   POST /api/suppliers/bulk
-// @access  Private
 exports.bulkUploadSuppliers = async (req, res) => {
   const { suppliers } = req.body;
-
   try {
-    if (!suppliers || !Array.isArray(suppliers)) {
-      return res.status(400).json({ success: false, message: 'Please provide a valid array of suppliers' });
-    }
+    if (!Array.isArray(suppliers) || suppliers.length === 0) return res.status(400).json({ success: false, message: 'Please provide a non-empty array of suppliers' });
+    if (suppliers.length > 5000) return res.status(413).json({ success: false, message: 'Bulk upload is limited to 5000 suppliers per request' });
 
-    const supplierCodes = suppliers.map((s) => parseInt(s.supplierCode, 10)).filter((code) => !isNaN(code));
-    
-    // Check for existing supplier codes in DB
-    const existingSuppliers = await Supplier.find({ supplierCode: { $in: supplierCodes } });
+    const supplierCodes = suppliers.map((s) => Number(s.supplierCode)).filter(Number.isInteger);
+    const existingSuppliers = await Supplier.find({ supplierCode: { $in: supplierCodes } }).select('supplierCode');
     const existingCodes = new Set(existingSuppliers.map((s) => s.supplierCode));
-
     const toInsert = [];
     const skipped = [];
 
-    for (const s of suppliers) {
-      const code = parseInt(s.supplierCode, 10);
-      if (isNaN(code)) {
-        skipped.push({ supplier: s, reason: 'Invalid or missing Supplier Code' });
-        continue;
-      }
-      if (existingCodes.has(code)) {
-        skipped.push({ supplier: s, reason: `Supplier Code #${code} already exists` });
-        continue;
-      }
-      if (!s.supplierName || !s.village) {
-        skipped.push({ supplier: s, reason: 'Missing required field (Name or Village)' });
-        continue;
-      }
-
-      toInsert.push({
-        supplierCode: code,
-        supplierName: s.supplierName.trim(),
-        fatherName: s.fatherName ? s.fatherName.trim() : '',
-        mobile: s.mobile ? s.mobile.toString().trim() : '',
-        village: s.village.trim(),
-        status: s.status === 'inactive' ? 'inactive' : 'active',
-        joiningDate: s.joiningDate && !isNaN(Date.parse(s.joiningDate)) ? new Date(s.joiningDate) : new Date(),
-      });
-
-      // Avoid inserting duplicates that are in the same payload
-      existingCodes.add(code);
+    for (const raw of suppliers) {
+      const s = normalizeSupplier(raw);
+      if (!Number.isInteger(s.supplierCode) || s.supplierCode <= 0) { skipped.push({ supplier: raw, reason: 'Invalid or missing Supplier Code' }); continue; }
+      if (existingCodes.has(s.supplierCode)) { skipped.push({ supplier: raw, reason: `Supplier Code #${s.supplierCode} already exists` }); continue; }
+      if (!s.supplierName || !s.village) { skipped.push({ supplier: raw, reason: 'Missing required field (Name or Village)' }); continue; }
+      toInsert.push(s);
+      existingCodes.add(s.supplierCode);
     }
 
-    if (toInsert.length > 0) {
-      await Supplier.insertMany(toInsert);
-      await logAudit(
-        `${req.user.name} (${req.user.phone})`,
-        'SUPPLIER_BULK_ADD',
-        `Bulk uploaded ${toInsert.length} suppliers`
-      );
+    if (toInsert.length) {
+      await Supplier.insertMany(toInsert, { ordered: false });
+      await logAudit(`${req.user.name} (${req.user.phone})`, 'SUPPLIER_BULK_ADD', `Bulk uploaded ${toInsert.length} suppliers`);
     }
-
-    res.status(200).json({
-      success: true,
-      insertedCount: toInsert.length,
-      skippedCount: skipped.length,
-      skipped,
-    });
+    return res.status(200).json({ success: true, insertedCount: toInsert.length, skippedCount: skipped.length, skipped });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Bulk supplier upload failed:', error);
+    return res.status(500).json({ success: false, message: 'Failed to bulk upload suppliers' });
   }
 };
