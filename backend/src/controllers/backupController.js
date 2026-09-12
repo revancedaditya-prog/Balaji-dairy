@@ -61,14 +61,14 @@ exports.restoreBackup = async (req, res) => {
       const activeUser = await User.findById(activeUserId).session(session);
       if (!activeUser) throw new Error('Active owner account no longer exists');
 
-      await Promise.all([
-        User.deleteMany({ _id: { $ne: activeUserId } }, { session }),
-        Supplier.deleteMany({}, { session }),
-        MilkEntry.deleteMany({}, { session }),
-        RateChart.deleteMany({}, { session }),
-        Payment.deleteMany({}, { session }),
-        AuditLog.deleteMany({}, { session }),
-      ]);
+      // Keep transaction operations sequential; parallel operations inside a MongoDB
+      // transaction are not supported reliably by the driver.
+      await User.deleteMany({ _id: { $ne: activeUserId } }, { session });
+      await Supplier.deleteMany({}, { session });
+      await MilkEntry.deleteMany({}, { session });
+      await RateChart.deleteMany({}, { session });
+      await Payment.deleteMany({}, { session });
+      await AuditLog.deleteMany({}, { session });
 
       const insertUsers = users.filter((u) => String(u._id) !== String(activeUserId));
       if (insertUsers.length) await User.insertMany(insertUsers, { session });
