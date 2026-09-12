@@ -16,14 +16,6 @@ const setSession = (session) => {
   else localStorage.removeItem(STORAGE_KEY);
 };
 
-export const normalizeIndianPhone = (value = '') => {
-  const digits = String(value).replace(/\D/g, '');
-  if (digits.length === 10) return `+91${digits}`;
-  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
-  if (digits.length >= 10 && digits.length <= 15) return `+${digits}`;
-  return String(value).trim();
-};
-
 const authHeaders = (extra = {}) => {
   const token = getSession()?.access_token;
   return {
@@ -64,43 +56,48 @@ const query = async (table, params = '', options = {}) => {
   return request(`/rest/v1/${table}${suffix}`, options);
 };
 
+const consumeRecoverySessionFromUrl = () => {
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  if (hash.get('type') !== 'recovery' || !hash.get('access_token')) return false;
+  setSession({
+    access_token: hash.get('access_token'),
+    refresh_token: hash.get('refresh_token'),
+    token_type: hash.get('token_type') || 'bearer',
+    expires_in: Number(hash.get('expires_in') || 3600),
+  });
+  window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+  return true;
+};
+
 export const supabaseLite = {
   url: SUPABASE_URL,
   publishableKey: SUPABASE_PUBLISHABLE_KEY,
   getSession,
   setSession,
   auth: {
-    async signInWithPassword({ phone, password }) {
-      const normalizedPhone = normalizeIndianPhone(phone);
+    async signInWithPassword({ email, password }) {
       const data = await request('/auth/v1/token?grant_type=password', {
         method: 'POST',
-        body: JSON.stringify({ phone: normalizedPhone, password }),
+        body: JSON.stringify({ email: String(email || '').trim().toLowerCase(), password }),
       });
       setSession(data);
       return data;
     },
-    async sendPasswordResetOtp(phone) {
-      const normalizedPhone = normalizeIndianPhone(phone);
-      return request('/auth/v1/otp', {
+    async sendPasswordResetEmail(email) {
+      return request('/auth/v1/recover', {
         method: 'POST',
-        body: JSON.stringify({ phone: normalizedPhone, create_user: false }),
+        body: JSON.stringify({
+          email: String(email || '').trim().toLowerCase(),
+          redirect_to: `${window.location.origin}${window.location.pathname}`,
+        }),
       });
     },
-    async verifyPasswordResetOtp({ phone, token }) {
-      const normalizedPhone = normalizeIndianPhone(phone);
-      const data = await request('/auth/v1/verify', {
-        method: 'POST',
-        body: JSON.stringify({ phone: normalizedPhone, token: String(token).trim(), type: 'sms' }),
-      });
-      setSession(data);
-      return data;
-    },
+    consumeRecoverySessionFromUrl,
     async updatePassword(password) {
-      const data = await request('/auth/v1/user', {
+      return request('/auth/v1/user', {
         method: 'PUT',
         body: JSON.stringify({ password }),
       });
-      return data;
     },
     async getUser() {
       const session = getSession();
