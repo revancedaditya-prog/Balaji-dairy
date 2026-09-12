@@ -19,17 +19,16 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const name = String(body.name || '').trim();
-    const phone = String(body.phone || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
     const password = String(body.password || '');
-    if (!name || !/^\+?[1-9]\d{9,14}$/.test(phone) || password.length < 6) {
-      throw new Error('Valid name, phone and password (minimum 6 characters) are required');
+    if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 6) {
+      throw new Error('Valid name, email and password (minimum 6 characters) are required');
     }
 
-    const normalizedPhone = phone.startsWith('+') ? phone : `+91${phone}`;
     const { data, error } = await admin.auth.admin.createUser({
-      phone: normalizedPhone,
+      email,
       password,
-      phone_confirm: true,
+      email_confirm: true,
       user_metadata: { full_name: name, role: 'owner' },
     });
     if (error) throw error;
@@ -37,12 +36,11 @@ Deno.serve(async (req) => {
     await admin.from('profiles').upsert({
       id: data.user.id,
       full_name: name,
-      phone: normalizedPhone,
       role: 'owner',
       status: 'active',
     });
 
-    return Response.json({ success: true, message: 'Owner account created. You can now sign in.' }, { headers: corsHeaders });
+    return Response.json({ success: true, message: 'Owner account created. You can now sign in with email.' }, { headers: corsHeaders });
   } catch (error) {
     return Response.json({ success: false, message: error instanceof Error ? error.message : 'Setup failed' }, { status: 400, headers: corsHeaders });
   }
