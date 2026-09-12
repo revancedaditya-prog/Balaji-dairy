@@ -1,202 +1,125 @@
 const User = require('../models/User');
 const logAudit = require('../utils/auditLogger');
 
-// @desc    Get all users
-// @route   GET /api/users
-// @access  Private (Owner Only)
+const validRoles = ['owner', 'manager', 'worker'];
+const validStatuses = ['active', 'inactive'];
+
 exports.getUsers = async (req, res) => {
   try {
     const users = await User.find({}).sort({ createdAt: -1 });
-    res.status(200).json({ success: true, count: users.length, data: users });
+    return res.status(200).json({ success: true, count: users.length, data: users });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to load users' });
   }
 };
 
-// @desc    Get single user
-// @route   GET /api/users/:id
-// @access  Private (Owner Only)
 exports.getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-    res.status(200).json({ success: true, data: user });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    return res.status(200).json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(400).json({ success: false, message: 'Invalid user id' });
   }
 };
 
-// @desc    Create new user
-// @route   POST /api/users
-// @access  Private (Owner Only)
 exports.createUser = async (req, res) => {
-  const { name, phone, password, role, status } = req.body;
-
   try {
-    if (!name || !phone || !password) {
-      return res.status(400).json({ success: false, message: 'Please provide name, phone, and password' });
-    }
+    const name = String(req.body.name || '').trim();
+    const phone = String(req.body.phone || '').trim();
+    const password = req.body.password;
+    const role = req.body.role || 'worker';
+    const status = req.body.status || 'active';
 
-    // Check if phone number already registered
-    const existing = await User.findOne({ phone });
-    if (existing) {
-      return res.status(400).json({ success: false, message: `Phone number ${phone} is already registered` });
-    }
+    if (!name || !phone || !password || password.length < 6) return res.status(400).json({ success: false, message: 'Name, phone and a password of at least 6 characters are required' });
+    if (!validRoles.includes(role) || !validStatuses.includes(status)) return res.status(400).json({ success: false, message: 'Invalid role or status' });
+    if (await User.exists({ phone })) return res.status(400).json({ success: false, message: `Phone number ${phone} is already registered` });
 
-    const newUser = new User({
-      name,
-      phone,
-      password,
-      role: role || 'worker',
-      status: status || 'active',
-    });
-
-    await newUser.save();
-
-    // Log audit
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'USER_CREATE',
-      `User ${name} (${phone})`,
-      null,
-      { name, phone, role: newUser.role, status: newUser.status }
-    );
-
-    // Remove password before returning
+    const newUser = await User.create({ name, phone, password, role, status });
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'USER_CREATE', `User ${name} (${phone})`, null, { name, phone, role, status });
     const returnUser = newUser.toObject();
     delete returnUser.password;
-
-    res.status(201).json({ success: true, data: returnUser });
+    return res.status(201).json({ success: true, data: returnUser });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Create user failed:', error);
+    return res.status(500).json({ success: false, message: 'Failed to create user' });
   }
 };
 
-// @desc    Update user details
-// @route   PUT /api/users/:id
-// @access  Private (Owner Only)
 exports.updateUser = async (req, res) => {
-  const { name, phone, role, status } = req.body;
-
   try {
     const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const oldValue = { name: user.name, phone: user.phone, role: user.role, status: user.status };
+    const isSelf = String(user._id) === String(req.user._id);
+    const nextRole = req.body.role || user.role;
+    const nextStatus = req.body.status || user.status;
+
+    if (!validRoles.includes(nextRole) || !validStatuses.includes(nextStatus)) return res.status(400).json({ success: false, message: 'Invalid role or status' });
+    if (isSelf && (nextRole !== 'owner' || nextStatus !== 'active')) {
+      return res.status(400).json({ success: false, message: 'You cannot demote or deactivate your own owner account' });
     }
 
-    const oldValue = {
-      name: user.name,
-      phone: user.phone,
-      role: user.role,
-      status: user.status,
-    };
+    if (user.role === 'owner' && user.status === 'active' && (nextRole !== 'owner' || nextStatus !== 'active')) {
+      const activeOwners = await User.countDocuments({ role: 'owner', status: 'active' });
+      if (activeOwners <= 1) return res.status(409).json({ success: false, message: 'At least one active owner account must remain' });
+    }
 
-    // Check phone availability if updated
-    if (phone && phone !== user.phone) {
-      const existing = await User.findOne({ phone });
-      if (existing) {
-        return res.status(400).json({ success: false, message: `Phone number ${phone} is already registered` });
-      }
+    if (req.body.phone !== undefined) {
+      const phone = String(req.body.phone).trim();
+      if (!phone) return res.status(400).json({ success: false, message: 'Phone number cannot be empty' });
+      if (phone !== user.phone && await User.exists({ phone })) return res.status(400).json({ success: false, message: `Phone number ${phone} is already registered` });
       user.phone = phone;
     }
-
-    if (name) user.name = name;
-    if (role) user.role = role;
-    if (status) user.status = status;
-
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ success: false, message: 'Name cannot be empty' });
+      user.name = name;
+    }
+    user.role = nextRole;
+    user.status = nextStatus;
     await user.save();
 
-    const newValue = {
-      name: user.name,
-      phone: user.phone,
-      role: user.role,
-      status: user.status,
-    };
-
-    // Log audit
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'USER_EDIT',
-      `User ${user.name} (${user.phone})`,
-      oldValue,
-      newValue
-    );
-
-    res.status(200).json({ success: true, data: newValue });
+    const newValue = { name: user.name, phone: user.phone, role: user.role, status: user.status };
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'USER_EDIT', `User ${user.name} (${user.phone})`, oldValue, newValue);
+    return res.status(200).json({ success: true, data: newValue });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Update user failed:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update user' });
   }
 };
 
-// @desc    Delete user
-// @route   DELETE /api/users/:id
-// @access  Private (Owner Only)
 exports.deleteUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (String(user._id) === String(req.user._id)) return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
+    if (user.role === 'owner' && user.status === 'active') {
+      const activeOwners = await User.countDocuments({ role: 'owner', status: 'active' });
+      if (activeOwners <= 1) return res.status(409).json({ success: false, message: 'At least one active owner account must remain' });
     }
 
-    // Prevent deleting oneself
-    if (user._id.toString() === req.user._id.toString()) {
-      return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
-    }
-
-    const oldValue = {
-      name: user.name,
-      phone: user.phone,
-      role: user.role,
-      status: user.status,
-    };
-
+    const oldValue = { name: user.name, phone: user.phone, role: user.role, status: user.status };
     await user.deleteOne();
-
-    // Log audit
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'USER_DELETE',
-      `User ${user.name} (${user.phone})`,
-      oldValue,
-      null
-    );
-
-    res.status(200).json({ success: true, message: 'User deleted successfully' });
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'USER_DELETE', `User ${user.name} (${user.phone})`, oldValue, null);
+    return res.status(200).json({ success: true, message: 'User deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to delete user' });
   }
 };
 
-// @desc    Reset user password
-// @route   PUT /api/users/:id/reset-password
-// @access  Private (Owner Only)
 exports.resetUserPassword = async (req, res) => {
-  const { password } = req.body;
-
   try {
-    if (!password || password.length < 6) {
-      return res.status(400).json({ success: false, message: 'Please provide a password of at least 6 characters' });
-    }
-
+    const { password } = req.body;
+    if (!password || password.length < 6) return res.status(400).json({ success: false, message: 'Please provide a password of at least 6 characters' });
     const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     user.password = password;
-    await user.save(); // save calls bcrypt pre-save hashing
-
-    // Log audit
-    await logAudit(
-      `${req.user.name} (${req.user.phone})`,
-      'USER_PASSWORD_RESET',
-      `User ${user.name} (${user.phone})`
-    );
-
-    res.status(200).json({ success: true, message: 'Password reset successfully' });
+    await user.save();
+    await logAudit(`${req.user.name} (${req.user.phone})`, 'USER_PASSWORD_RESET', `User ${user.name} (${user.phone})`);
+    return res.status(200).json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to reset password' });
   }
 };

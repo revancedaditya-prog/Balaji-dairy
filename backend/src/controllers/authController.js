@@ -1,28 +1,23 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const logAudit = require('../utils/auditLogger');
+const { getJwtSecret, getJwtExpiry } = require('../config/auth');
 
-// Generate Token
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'balaji_dairy_secret_jwt_2026_secure_key_987', {
-    expiresIn: process.env.JWT_EXPIRE || '30d',
-  });
-};
+const generateToken = (id) => jwt.sign({ id }, getJwtSecret(), { expiresIn: getJwtExpiry() });
 
 // @desc    Auth user & get token
 // @route   POST /api/auth/login
 // @access  Public
 exports.login = async (req, res) => {
-  const { phone, password } = req.body;
+  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : String(req.body.phone || '').trim();
+  const { password } = req.body;
 
   try {
     if (!phone || !password) {
       return res.status(400).json({ success: false, message: 'Please provide phone and password' });
     }
 
-    // Check for user
     const user = await User.findOne({ phone }).select('+password');
-
     if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
@@ -31,19 +26,15 @@ exports.login = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Account is inactive' });
     }
 
-    // Check if password matches
     const isMatch = await user.matchPassword(password);
-
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
     const token = generateToken(user._id);
-
-    // Track login audit
     await logAudit(`${user.name} (${user.phone})`, 'USER_LOGIN', `User Profile ${user.phone}`);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       token,
       user: {
@@ -54,7 +45,8 @@ exports.login = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Login failed:', error);
+    return res.status(500).json({ success: false, message: 'Unable to login' });
   }
 };
 
@@ -62,14 +54,7 @@ exports.login = async (req, res) => {
 // @route   GET /api/auth/me
 // @access  Private
 exports.getMe = async (req, res) => {
-  try {
-    res.status(200).json({
-      success: true,
-      user: req.user,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  return res.status(200).json({ success: true, user: req.user });
 };
 
 // @desc    Change password
@@ -82,24 +67,30 @@ exports.changePassword = async (req, res) => {
     if (!oldPassword || !newPassword) {
       return res.status(400).json({ success: false, message: 'Please provide old and new passwords' });
     }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 6 characters long' });
+    }
+    if (oldPassword === newPassword) {
+      return res.status(400).json({ success: false, message: 'New password must be different from old password' });
+    }
 
-    // Fetch user with password
     const user = await User.findById(req.user._id).select('+password');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
-    // Verify old password
     const isMatch = await user.matchPassword(oldPassword);
     if (!isMatch) {
       return res.status(400).json({ success: false, message: 'Incorrect old password' });
     }
 
-    // Update password
     user.password = newPassword;
     await user.save();
 
     await logAudit(`${req.user.name} (${req.user.phone})`, 'PASSWORD_CHANGE', `User Profile ${req.user.phone}`);
-
-    res.status(200).json({ success: true, message: 'Password updated successfully' });
+    return res.status(200).json({ success: true, message: 'Password updated successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Password change failed:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update password' });
   }
 };
