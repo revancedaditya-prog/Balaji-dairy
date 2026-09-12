@@ -2,8 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
+const { getJwtSecret } = require('./config/auth');
 
-// Route imports
 const authRoutes = require('./routes/authRoutes');
 const supplierRoutes = require('./routes/supplierRoutes');
 const milkEntryRoutes = require('./routes/milkEntryRoutes');
@@ -14,26 +14,37 @@ const auditRoutes = require('./routes/auditRoutes');
 const backupRoutes = require('./routes/backupRoutes');
 const userRoutes = require('./routes/userRoutes');
 
-// Initialize app
 const app = express();
 
-// Connect to Database
+// Fail fast on unsafe/missing production authentication configuration.
+getJwtSecret();
 connectDB();
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Increased limit for bulk restore operations
+const configuredOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    // Native apps/curl may not send Origin. Development remains permissive unless configured.
+    if (!origin || process.env.NODE_ENV !== 'production' || configuredOrigins.length === 0 || configuredOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Origin not allowed by CORS'));
+  },
+  credentials: false,
+}));
+app.use(express.json({ limit: '10mb' }));
 app.use((req, res, next) => {
-  console.log(`[API Request] ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log(`[API Request] ${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
-// Welcome message
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to Balaji Dairy Management API server' });
 });
 
-// API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/milk-entries', milkEntryRoutes);
@@ -44,21 +55,18 @@ app.use('/api/audit-logs', auditRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/users', userRoutes);
 
-// 404 Route handler
-app.use((req, res, next) => {
+app.use((req, res) => {
   res.status(404).json({ success: false, message: 'API Route Not Found' });
 });
 
-// Global Error Handler
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error(err.stack || err);
   res.status(500).json({
     success: false,
-    message: err.message || 'Internal Server Error',
+    message: process.env.NODE_ENV === 'production' ? 'Internal Server Error' : (err.message || 'Internal Server Error'),
   });
 });
 
-// Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
