@@ -1,425 +1,138 @@
 const MilkEntry = require('../models/MilkEntry');
 const Supplier = require('../models/Supplier');
 
-// Helper to construct a standard match stage
-const buildMatchStage = (query) => {
-  const { startDate, endDate, shift, supplierCode, village } = query;
-  let match = {};
+const getISTDate = (date = new Date()) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(date);
 
+const buildMatchStage = (query) => {
+  const { startDate, endDate, shift, supplierCode } = query;
+  const match = {};
   if (startDate || endDate) {
     match.date = {};
     if (startDate) match.date.$gte = startDate;
     if (endDate) match.date.$lte = endDate;
   }
-
-  if (shift) {
-    match.shift = shift;
-  }
-
+  if (shift) match.shift = shift;
   if (supplierCode) {
-    match.supplierCode = parseInt(supplierCode, 10);
+    const code = Number(supplierCode);
+    if (Number.isInteger(code)) match.supplierCode = code;
   }
-
   return match;
 };
 
-// Helper to compute weighted averages and format output
 const commonGroupStage = {
-  totalMilk: { $sum: '$milkQuantity' },
-  totalAmount: { $sum: '$amount' },
-  // To compute weighted average: Sum(fat * milkQuantity)
+  totalMilk: { $sum: '$milkQuantity' }, totalAmount: { $sum: '$amount' },
   fatWeightSum: { $sum: { $multiply: ['$fat', '$milkQuantity'] } },
-  snfWeightSum: { $sum: { $multiply: ['$snf', '$milkQuantity'] } },
-  entryCount: { $sum: 1 },
+  snfWeightSum: { $sum: { $multiply: ['$snf', '$milkQuantity'] } }, entryCount: { $sum: 1 },
 };
-
 const commonProjectStage = {
-  totalMilk: { $round: ['$totalMilk', 2] },
-  totalAmount: { $round: ['$totalAmount', 2] },
-  avgFat: {
-    $cond: [
-      { $gt: ['$totalMilk', 0] },
-      { $round: [{ $divide: ['$fatWeightSum', '$totalMilk'] }, 2] },
-      0,
-    ],
-  },
-  avgSnf: {
-    $cond: [
-      { $gt: ['$totalMilk', 0] },
-      { $round: [{ $divide: ['$snfWeightSum', '$totalMilk'] }, 2] },
-      0,
-    ],
-  },
-  entryCount: 1,
+  totalMilk: { $round: ['$totalMilk', 2] }, totalAmount: { $round: ['$totalAmount', 2] },
+  avgFat: { $cond: [{ $gt: ['$totalMilk', 0] }, { $round: [{ $divide: ['$fatWeightSum', '$totalMilk'] }, 2] }, 0] },
+  avgSnf: { $cond: [{ $gt: ['$totalMilk', 0] }, { $round: [{ $divide: ['$snfWeightSum', '$totalMilk'] }, 2] }, 0] }, entryCount: 1,
 };
 
-// @desc    Get dashboard summary counters
-// @route   GET /api/reports/dashboard-stats
-// @access  Private
+const applyVillageFilter = async (match, village) => {
+  if (!village) return;
+  const suppliers = await Supplier.find({ village: new RegExp(village, 'i') }).select('supplierCode');
+  const codes = suppliers.map((s) => s.supplierCode);
+  match.supplierCode = match.supplierCode ? { $in: codes.filter((code) => code === match.supplierCode) } : { $in: codes };
+};
+
 exports.getDashboardStats = async (req, res) => {
   try {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const firstDayOfMonth = todayStr.substring(0, 7) + '-01';
-
-    // 1. Total active suppliers
-    const totalSuppliers = await Supplier.countDocuments({ status: 'active' });
-
-    // 2. Today's collections
-    const todayStats = await MilkEntry.aggregate([
-      { $match: { date: todayStr } },
-      {
-        $group: {
-          _id: null,
-          totalMilk: { $sum: '$milkQuantity' },
-          totalAmount: { $sum: '$amount' },
-        },
-      },
+    const todayStr = getISTDate();
+    const firstDayOfMonth = `${todayStr.substring(0, 7)}-01`;
+    const [totalSuppliers, todayStats, shiftStats, monthStats, recentEntries] = await Promise.all([
+      Supplier.countDocuments({ status: 'active' }),
+      MilkEntry.aggregate([{ $match: { date: todayStr } }, { $group: { _id: null, totalMilk: { $sum: '$milkQuantity' }, totalAmount: { $sum: '$amount' } } }]),
+      MilkEntry.aggregate([{ $match: { date: todayStr } }, { $group: { _id: '$shift', totalMilk: { $sum: '$milkQuantity' } } }]),
+      MilkEntry.aggregate([{ $match: { date: { $gte: firstDayOfMonth, $lte: todayStr } } }, { $group: { _id: null, totalMilk: { $sum: '$milkQuantity' } } }]),
+      MilkEntry.find({}).sort({ date: -1, time: -1 }).limit(5),
     ]);
-
-    const todayMilk = todayStats[0] ? todayStats[0].totalMilk : 0;
-    const todayAmount = todayStats[0] ? todayStats[0].totalAmount : 0;
-
-    // 3. Morning/Evening breakdowns for today
-    const shiftStats = await MilkEntry.aggregate([
-      { $match: { date: todayStr } },
-      {
-        $group: {
-          _id: '$shift',
-          totalMilk: { $sum: '$milkQuantity' },
-          totalAmount: { $sum: '$amount' },
-        },
-      },
-    ]);
-
-    let morningMilk = 0;
-    let eveningMilk = 0;
-
-    shiftStats.forEach((s) => {
-      if (s._id === 'Morning') morningMilk = s.totalMilk;
-      if (s._id === 'Evening') eveningMilk = s.totalMilk;
-    });
-
-    // 4. Monthly collection total
-    const monthStats = await MilkEntry.aggregate([
-      { $match: { date: { $gte: firstDayOfMonth, $lte: todayStr } } },
-      {
-        $group: {
-          _id: null,
-          totalMilk: { $sum: '$milkQuantity' },
-          totalAmount: { $sum: '$amount' },
-        },
-      },
-    ]);
-
-    const monthlyMilk = monthStats[0] ? monthStats[0].totalMilk : 0;
-
-    // 5. Recent Milk entries (last 5)
-    const recentEntries = await MilkEntry.find({}).sort({ date: -1, time: -1 }).limit(5);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        totalSuppliers,
-        todayMilk: Math.round(todayMilk * 100) / 100,
-        todayAmount: Math.round(todayAmount * 100) / 100,
-        morningMilk: Math.round(morningMilk * 100) / 100,
-        eveningMilk: Math.round(eveningMilk * 100) / 100,
-        monthlyMilk: Math.round(monthlyMilk * 100) / 100,
-        recentEntries,
-      },
-    });
+    const round = (v) => Math.round((v || 0) * 100) / 100;
+    const shiftMap = new Map(shiftStats.map((s) => [s._id, s.totalMilk]));
+    return res.status(200).json({ success: true, data: {
+      totalSuppliers, todayMilk: round(todayStats[0]?.totalMilk), todayAmount: round(todayStats[0]?.totalAmount),
+      morningMilk: round(shiftMap.get('Morning')), eveningMilk: round(shiftMap.get('Evening')),
+      monthlyMilk: round(monthStats[0]?.totalMilk), recentEntries,
+    } });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to load dashboard statistics' });
   }
 };
 
-// @desc    Get Daily / Monthly Collection Trend Charts data
-// @route   GET /api/reports/charts
-// @access  Private
 exports.getChartsData = async (req, res) => {
   try {
-    // A. Daily Trend (last 10 days of entries)
-    const dailyTrend = await MilkEntry.aggregate([
-      {
-        $group: {
-          _id: '$date',
-          milk: { $sum: '$milkQuantity' },
-          amount: { $sum: '$amount' },
-        },
-      },
-      { $sort: { _id: 1 } },
-      { $limit: 10 },
-      {
-        $project: {
-          date: '$_id',
-          milk: { $round: ['$milk', 2] },
-          amount: { $round: ['$amount', 2] },
-          _id: 0,
-        },
-      },
-    ]);
-
-    // B. Monthly Trend (months of current year)
-    const currentYear = new Date().getFullYear().toString();
-    const monthlyTrend = await MilkEntry.aggregate([
-      {
-        $match: {
-          date: { $gte: `${currentYear}-01-01`, $lte: `${currentYear}-12-31` },
-        },
-      },
-      {
-        $group: {
-          _id: { $substrCP: ['$date', 0, 7] }, // Returns YYYY-MM
-          milk: { $sum: '$milkQuantity' },
-          amount: { $sum: '$amount' },
-        },
-      },
-      { $sort: { _id: 1 } },
-      {
-        $project: {
-          month: '$_id',
-          milk: { $round: ['$milk', 2] },
-          amount: { $round: ['$amount', 2] },
-          _id: 0,
-        },
-      },
-    ]);
-
-    // C. Top 5 suppliers by quantity (last 30 days)
+    const today = getISTDate();
+    const currentYear = today.substring(0, 4);
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+    const thirtyDaysAgoStr = getISTDate(thirtyDaysAgo);
 
-    const topSuppliers = await MilkEntry.aggregate([
-      { $match: { date: { $gte: thirtyDaysAgoStr } } },
-      {
-        $group: {
-          _id: '$supplierCode',
-          name: { $first: '$supplierName' },
-          milk: { $sum: '$milkQuantity' },
-        },
-      },
-      { $sort: { milk: -1 } },
-      { $limit: 5 },
-      {
-        $project: {
-          supplierCode: '$_id',
-          name: 1,
-          milk: { $round: ['$milk', 2] },
-          _id: 0,
-        },
-      },
+    const [dailyTrend, monthlyTrend, topSuppliers] = await Promise.all([
+      MilkEntry.aggregate([
+        { $group: { _id: '$date', milk: { $sum: '$milkQuantity' }, amount: { $sum: '$amount' } } },
+        { $sort: { _id: -1 } }, { $limit: 10 }, { $sort: { _id: 1 } },
+        { $project: { date: '$_id', milk: { $round: ['$milk', 2] }, amount: { $round: ['$amount', 2] }, _id: 0 } },
+      ]),
+      MilkEntry.aggregate([
+        { $match: { date: { $gte: `${currentYear}-01-01`, $lte: `${currentYear}-12-31` } } },
+        { $group: { _id: { $substrCP: ['$date', 0, 7] }, milk: { $sum: '$milkQuantity' }, amount: { $sum: '$amount' } } },
+        { $sort: { _id: 1 } }, { $project: { month: '$_id', milk: { $round: ['$milk', 2] }, amount: { $round: ['$amount', 2] }, _id: 0 } },
+      ]),
+      MilkEntry.aggregate([
+        { $match: { date: { $gte: thirtyDaysAgoStr } } },
+        { $group: { _id: '$supplierCode', name: { $first: '$supplierName' }, milk: { $sum: '$milkQuantity' } } },
+        { $sort: { milk: -1 } }, { $limit: 5 }, { $project: { supplierCode: '$_id', name: 1, milk: { $round: ['$milk', 2] }, _id: 0 } },
+      ]),
     ]);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        dailyTrend,
-        monthlyTrend,
-        topSuppliers,
-      },
-    });
+    return res.status(200).json({ success: true, data: { dailyTrend, monthlyTrend, topSuppliers } });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to load chart data' });
   }
 };
 
-// @desc    Generate Daily & Shift Reports
-// @route   GET /api/reports/shift-wise
-// @access  Private
 exports.getShiftWiseReport = async (req, res) => {
   try {
-    const match = buildMatchStage(req.query);
-
-    // If village is specified, filter codes
-    if (req.query.village) {
-      const sups = await Supplier.find({ village: new RegExp(req.query.village, 'i') }).select('supplierCode');
-      const codes = sups.map(s => s.supplierCode);
-      match.supplierCode = { $in: codes };
-    }
-
-    const report = await MilkEntry.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: { date: '$date', shift: '$shift' },
-          ...commonGroupStage,
-        },
-      },
-      {
-        $project: {
-          date: '$_id.date',
-          shift: '$_id.shift',
-          ...commonProjectStage,
-          _id: 0,
-        },
-      },
-      { $sort: { date: -1, shift: 1 } },
-    ]);
-
-    res.status(200).json({ success: true, data: report });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+    const match = buildMatchStage(req.query); await applyVillageFilter(match, req.query.village);
+    const report = await MilkEntry.aggregate([{ $match: match }, { $group: { _id: { date: '$date', shift: '$shift' }, ...commonGroupStage } }, { $project: { date: '$_id.date', shift: '$_id.shift', ...commonProjectStage, _id: 0 } }, { $sort: { date: -1, shift: 1 } }]);
+    return res.status(200).json({ success: true, data: report });
+  } catch (error) { return res.status(500).json({ success: false, message: 'Failed to generate shift report' }); }
 };
 
-// @desc    Generate Supplier-wise report
-// @route   GET /api/reports/supplier-wise
-// @access  Private
 exports.getSupplierWiseReport = async (req, res) => {
   try {
-    const match = buildMatchStage(req.query);
-
-    if (req.query.village) {
-      const sups = await Supplier.find({ village: new RegExp(req.query.village, 'i') }).select('supplierCode');
-      const codes = sups.map(s => s.supplierCode);
-      match.supplierCode = { $in: codes };
-    }
-
-    const report = await MilkEntry.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: '$supplierCode',
-          supplierName: { $first: '$supplierName' },
-          ...commonGroupStage,
-        },
-      },
-      {
-        $project: {
-          supplierCode: '$_id',
-          supplierName: 1,
-          ...commonProjectStage,
-          _id: 0,
-        },
-      },
-      { $sort: { totalMilk: -1 } },
-    ]);
-
-    res.status(200).json({ success: true, data: report });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+    const match = buildMatchStage(req.query); await applyVillageFilter(match, req.query.village);
+    const report = await MilkEntry.aggregate([{ $match: match }, { $group: { _id: '$supplierCode', supplierName: { $first: '$supplierName' }, ...commonGroupStage } }, { $project: { supplierCode: '$_id', supplierName: 1, ...commonProjectStage, _id: 0 } }, { $sort: { totalMilk: -1 } }]);
+    return res.status(200).json({ success: true, data: report });
+  } catch (error) { return res.status(500).json({ success: false, message: 'Failed to generate supplier report' }); }
 };
 
-// @desc    Generate Village-wise report
-// @route   GET /api/reports/village-wise
-// @access  Private
 exports.getVillageWiseReport = async (req, res) => {
   try {
     const match = buildMatchStage(req.query);
-
-    // We need to associate village to the entries
-    // Let's use aggregate $lookup to supplier database
     const report = await MilkEntry.aggregate([
-      { $match: match },
-      {
-        $lookup: {
-          from: 'suppliers',
-          localField: 'supplierCode',
-          foreignField: 'supplierCode',
-          as: 'supplierInfo',
-        },
-      },
-      { $unwind: '$supplierInfo' },
-      {
-        // Filter by village if query param is set
-        $match: req.query.village
-          ? { 'supplierInfo.village': new RegExp(req.query.village, 'i') }
-          : {},
-      },
-      {
-        $group: {
-          _id: '$supplierInfo.village',
-          ...commonGroupStage,
-        },
-      },
-      {
-        $project: {
-          village: '$_id',
-          ...commonProjectStage,
-          _id: 0,
-        },
-      },
-      { $sort: { totalMilk: -1 } },
+      { $match: match }, { $lookup: { from: 'suppliers', localField: 'supplierCode', foreignField: 'supplierCode', as: 'supplierInfo' } }, { $unwind: '$supplierInfo' },
+      { $match: req.query.village ? { 'supplierInfo.village': new RegExp(req.query.village, 'i') } : {} },
+      { $group: { _id: '$supplierInfo.village', ...commonGroupStage } }, { $project: { village: '$_id', ...commonProjectStage, _id: 0 } }, { $sort: { totalMilk: -1 } },
     ]);
-
-    res.status(200).json({ success: true, data: report });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+    return res.status(200).json({ success: true, data: report });
+  } catch (error) { return res.status(500).json({ success: false, message: 'Failed to generate village report' }); }
 };
 
-// @desc    Generate Monthly-wise report
-// @route   GET /api/reports/monthly
-// @access  Private
 exports.getMonthlyReport = async (req, res) => {
   try {
-    const match = buildMatchStage(req.query);
-
-    if (req.query.village) {
-      const sups = await Supplier.find({ village: new RegExp(req.query.village, 'i') }).select('supplierCode');
-      const codes = sups.map(s => s.supplierCode);
-      match.supplierCode = { $in: codes };
-    }
-
-    const report = await MilkEntry.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: { $substrCP: ['$date', 0, 7] }, // Returns YYYY-MM
-          ...commonGroupStage,
-        },
-      },
-      {
-        $project: {
-          month: '$_id',
-          ...commonProjectStage,
-          _id: 0,
-        },
-      },
-      { $sort: { month: -1 } },
-    ]);
-
-    res.status(200).json({ success: true, data: report });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+    const match = buildMatchStage(req.query); await applyVillageFilter(match, req.query.village);
+    const report = await MilkEntry.aggregate([{ $match: match }, { $group: { _id: { $substrCP: ['$date', 0, 7] }, ...commonGroupStage } }, { $project: { month: '$_id', ...commonProjectStage, _id: 0 } }, { $sort: { month: -1 } }]);
+    return res.status(200).json({ success: true, data: report });
+  } catch (error) { return res.status(500).json({ success: false, message: 'Failed to generate monthly report' }); }
 };
 
-// @desc    Generate Yearly-wise report
-// @route   GET /api/reports/yearly
-// @access  Private
 exports.getYearlyReport = async (req, res) => {
   try {
-    const match = buildMatchStage(req.query);
-
-    if (req.query.village) {
-      const sups = await Supplier.find({ village: new RegExp(req.query.village, 'i') }).select('supplierCode');
-      const codes = sups.map(s => s.supplierCode);
-      match.supplierCode = { $in: codes };
-    }
-
-    const report = await MilkEntry.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: { $substrCP: ['$date', 0, 4] }, // Returns YYYY
-          ...commonGroupStage,
-        },
-      },
-      {
-        $project: {
-          year: '$_id',
-          ...commonProjectStage,
-          _id: 0,
-        },
-      },
-      { $sort: { year: -1 } },
-    ]);
-
-    res.status(200).json({ success: true, data: report });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+    const match = buildMatchStage(req.query); await applyVillageFilter(match, req.query.village);
+    const report = await MilkEntry.aggregate([{ $match: match }, { $group: { _id: { $substrCP: ['$date', 0, 4] }, ...commonGroupStage } }, { $project: { year: '$_id', ...commonProjectStage, _id: 0 } }, { $sort: { year: -1 } }]);
+    return res.status(200).json({ success: true, data: report });
+  } catch (error) { return res.status(500).json({ success: false, message: 'Failed to generate yearly report' }); }
 };
