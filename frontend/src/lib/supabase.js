@@ -75,10 +75,11 @@ export const supabaseLite = {
   getSession,
   setSession,
   auth: {
-    async signInWithPassword({ email, password }) {
+    async signInWithPassword({ email, phone, password }) {
+      const identifier = String(email ?? phone ?? '').trim().toLowerCase();
       const data = await request('/auth/v1/token?grant_type=password', {
         method: 'POST',
-        body: JSON.stringify({ email: String(email || '').trim().toLowerCase(), password }),
+        body: JSON.stringify({ email: identifier, password }),
       });
       setSession(data);
       return data;
