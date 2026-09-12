@@ -1,16 +1,15 @@
-import React, { useState } from 'react';
-import { Milk, Phone, LockKeyhole, UserRound, Database, KeyRound } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Milk, Mail, LockKeyhole, UserRound, Database, KeyRound } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import supabase from '../../lib/supabase';
 
 const Login = () => {
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [setupMode, setSetupMode] = useState(false);
   const [resetMode, setResetMode] = useState(false);
-  const [resetStep, setResetStep] = useState('phone');
-  const [otp, setOtp] = useState('');
+  const [resetStep, setResetStep] = useState('email');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState('');
@@ -19,23 +18,34 @@ const Login = () => {
   const [resetLoading, setResetLoading] = useState(false);
   const { login, loading } = useAuth();
 
+  useEffect(() => {
+    if (supabase.auth.consumeRecoverySessionFromUrl()) {
+      setResetMode(true);
+      setResetStep('password');
+      setSuccess('Recovery link verified. Create your new password.');
+    }
+  }, []);
+
   const clearMessages = () => {
     setLocalError('');
     setSuccess('');
   };
 
+  const validEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     clearMessages();
-    if (!phone || !password) return setLocalError('Please fill in phone number and password');
+    if (!email || !password) return setLocalError('Please fill in email ID and password');
+    if (!validEmail(email)) return setLocalError('Please enter a valid email ID');
 
     if (setupMode) {
       if (!name.trim()) return setLocalError('Please enter owner name');
       try {
         setSetupLoading(true);
-        const res = await supabase.function('bootstrap-owner', { name: name.trim(), phone: phone.trim(), password });
+        const res = await supabase.function('bootstrap-owner', { name: name.trim(), email: email.trim().toLowerCase(), password });
         if (!res?.success) throw new Error(res?.message || 'Owner setup failed');
-        setSuccess('Owner account created. You can now login.');
+        setSuccess('Owner account created. You can now login with email.');
         setSetupMode(false);
       } catch (err) {
         setLocalError(err.message || 'Owner setup failed');
@@ -45,42 +55,22 @@ const Login = () => {
       return;
     }
 
-    const res = await login(phone, password);
+    // authService currently keeps the first login argument for compatibility;
+    // it is now treated as an email by the Supabase auth helper.
+    const res = await login(email, password);
     if (!res.success) setLocalError(res.message || 'Login failed. Please check credentials.');
   };
 
   const startReset = async (e) => {
     e.preventDefault();
     clearMessages();
-    if (!phone.trim()) return setLocalError('Enter your registered mobile number');
+    if (!validEmail(email)) return setLocalError('Enter your registered email ID');
     try {
       setResetLoading(true);
-      await supabase.auth.sendPasswordResetOtp(phone.trim());
-      setResetStep('otp');
-      setSuccess('OTP sent to your registered mobile number.');
+      await supabase.auth.sendPasswordResetEmail(email.trim());
+      setSuccess('Password reset link sent to your registered email ID. Open the link from your email.');
     } catch (err) {
-      const message = err.message || 'Could not send OTP';
-      if (/provider|sms|phone/i.test(message)) {
-        setLocalError('SMS/Phone provider is not configured in Supabase yet. Enable a Phone provider to use OTP password reset.');
-      } else {
-        setLocalError(message);
-      }
-    } finally {
-      setResetLoading(false);
-    }
-  };
-
-  const verifyOtp = async (e) => {
-    e.preventDefault();
-    clearMessages();
-    if (!otp.trim()) return setLocalError('Enter the OTP');
-    try {
-      setResetLoading(true);
-      await supabase.auth.verifyPasswordResetOtp({ phone: phone.trim(), token: otp.trim() });
-      setResetStep('password');
-      setSuccess('OTP verified. Create your new password.');
-    } catch (err) {
-      setLocalError(err.message || 'Invalid or expired OTP');
+      setLocalError(err.message || 'Could not send password reset email');
     } finally {
       setResetLoading(false);
     }
@@ -96,12 +86,11 @@ const Login = () => {
       await supabase.auth.updatePassword(newPassword);
       await supabase.auth.signOut();
       setPassword('');
-      setOtp('');
       setNewPassword('');
       setConfirmPassword('');
       setResetMode(false);
-      setResetStep('phone');
-      setSuccess('Password changed successfully. Login with your new password.');
+      setResetStep('email');
+      setSuccess('Password changed successfully. Login with your email and new password.');
     } catch (err) {
       setLocalError(err.message || 'Could not update password');
     } finally {
@@ -118,33 +107,22 @@ const Login = () => {
           <div className="login-header">
             <div className="brand-logo"><KeyRound size={30} strokeWidth={2.2} /></div>
             <h1>Reset Password</h1>
-            <p>Verify your registered mobile number with OTP</p>
+            <p>Use your registered email ID to receive a secure reset link</p>
           </div>
 
           {localError && <div className="error-alert" style={{marginBottom:'12px'}}>{localError}</div>}
           {success && <div className="success-alert" style={{marginBottom:'12px'}}>{success}</div>}
 
-          {resetStep === 'phone' && (
+          {resetStep === 'email' && (
             <form onSubmit={startReset} className="login-form">
               <div className="form-group">
-                <label className="form-label">Registered Mobile Number</label>
+                <label className="form-label">Registered Email ID</label>
                 <div className="input-with-icon">
-                  <Phone size={18} className="input-icon" />
-                  <input type="tel" inputMode="numeric" className="form-control" placeholder="10-digit mobile number" value={phone} onChange={(e)=>setPhone(e.target.value)} required />
+                  <Mail size={18} className="input-icon" />
+                  <input type="email" className="form-control" placeholder="name@example.com" value={email} onChange={(e)=>setEmail(e.target.value)} autoComplete="email" required />
                 </div>
               </div>
-              <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={busy}>{busy ? 'Sending OTP...' : 'Send OTP'}</button>
-            </form>
-          )}
-
-          {resetStep === 'otp' && (
-            <form onSubmit={verifyOtp} className="login-form">
-              <div className="form-group">
-                <label className="form-label">OTP</label>
-                <input type="text" inputMode="numeric" className="form-control" placeholder="Enter OTP" value={otp} onChange={(e)=>setOtp(e.target.value)} required />
-              </div>
-              <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={busy}>{busy ? 'Verifying...' : 'Verify OTP'}</button>
-              <button type="button" className="btn btn-block" style={{marginTop:'8px'}} onClick={startReset} disabled={busy}>Resend OTP</button>
+              <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={busy}>{busy ? 'Sending...' : 'Send Reset Link'}</button>
             </form>
           )}
 
@@ -162,7 +140,7 @@ const Login = () => {
             </form>
           )}
 
-          <button type="button" onClick={()=>{setResetMode(false);setResetStep('phone');clearMessages();}} style={{width:'100%',marginTop:'14px',border:'none',background:'transparent',color:'#60707b',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>← Back to login</button>
+          <button type="button" onClick={()=>{setResetMode(false);setResetStep('email');clearMessages();}} style={{width:'100%',marginTop:'14px',border:'none',background:'transparent',color:'#60707b',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>← Back to login</button>
         </div>
       </div>
     );
@@ -197,10 +175,10 @@ const Login = () => {
           )}
 
           <div className="form-group">
-            <label className="form-label">Phone Number</label>
+            <label className="form-label">Email ID</label>
             <div className="input-with-icon">
-              <Phone size={18} className="input-icon" />
-              <input type="tel" inputMode="numeric" className="form-control" placeholder="10-digit mobile number" value={phone} onChange={(e)=>setPhone(e.target.value)} required />
+              <Mail size={18} className="input-icon" />
+              <input type="email" className="form-control" placeholder="name@example.com" value={email} onChange={(e)=>setEmail(e.target.value)} autoComplete="email" required />
             </div>
           </div>
 
@@ -208,7 +186,7 @@ const Login = () => {
             <label className="form-label">Password</label>
             <div className="input-with-icon">
               <LockKeyhole size={18} className="input-icon" />
-              <input type="password" className="form-control" placeholder={setupMode ? 'Create password (minimum 6 characters)' : 'Enter password'} value={password} onChange={(e)=>setPassword(e.target.value)} minLength="6" required />
+              <input type="password" className="form-control" placeholder={setupMode ? 'Create password (minimum 6 characters)' : 'Enter password'} value={password} onChange={(e)=>setPassword(e.target.value)} minLength="6" autoComplete="current-password" required />
             </div>
           </div>
 
@@ -218,7 +196,7 @@ const Login = () => {
         </form>
 
         {!setupMode && (
-          <button type="button" onClick={()=>{setResetMode(true);clearMessages();}} style={{width:'100%',marginTop:'12px',border:'none',background:'transparent',color:'#9a741f',fontSize:'12px',fontWeight:800,cursor:'pointer'}}>Forgot password? Reset with OTP</button>
+          <button type="button" onClick={()=>{setResetMode(true);clearMessages();}} style={{width:'100%',marginTop:'12px',border:'none',background:'transparent',color:'#9a741f',fontSize:'12px',fontWeight:800,cursor:'pointer'}}>Forgot password? Reset by email</button>
         )}
 
         <button type="button" onClick={()=>{setSetupMode(!setupMode);clearMessages();}} style={{width:'100%',marginTop:'10px',border:'none',background:'transparent',color:'#60707b',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>
