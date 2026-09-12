@@ -82,11 +82,11 @@ exports.updateSupplier = async (req, res) => {
       const newCode = Number(req.body.supplierCode);
       if (!Number.isInteger(newCode) || newCode <= 0) return res.status(400).json({ success: false, message: 'Invalid supplier code' });
       if (await Supplier.exists({ supplierCode: newCode })) return res.status(400).json({ success: false, message: `Supplier Code #${newCode} is already registered` });
-      const hasHistory = await Promise.any([
-        MilkEntry.exists({ supplierCode: supplier.supplierCode }).then(Boolean),
-        Payment.exists({ supplierCode: supplier.supplierCode }).then(Boolean),
-      ]).catch(() => false);
-      if (hasHistory) return res.status(409).json({ success: false, message: 'Supplier code cannot be changed after milk/payment history exists. Edit the other supplier details instead.' });
+      const [milkHistory, paymentHistory] = await Promise.all([
+        MilkEntry.exists({ supplierCode: supplier.supplierCode }),
+        Payment.exists({ supplierCode: supplier.supplierCode }),
+      ]);
+      if (milkHistory || paymentHistory) return res.status(409).json({ success: false, message: 'Supplier code cannot be changed after milk/payment history exists. Edit the other supplier details instead.' });
       supplier.supplierCode = newCode;
     }
 
