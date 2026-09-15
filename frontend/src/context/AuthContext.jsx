@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { authService } from '../services/api';
+import supabase from '../lib/supabase';
 
 const AuthContext = createContext();
 
@@ -8,52 +9,41 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const clearSession = () => {
-    localStorage.removeItem('token');
+  const clearSession = async () => {
+    try { await supabase.auth.signOut(); } catch {}
     setUser(null);
   };
 
   const checkAuth = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    if (!supabase.getSession()?.access_token) {
       setUser(null);
       setLoading(false);
       return;
     }
-
     try {
       setLoading(true);
       const data = await authService.getMe();
-      if (data.success) setUser(data.user);
-      else clearSession();
-    } catch (err) {
-      clearSession();
+      if (data.success && data.user?.status === 'active') setUser(data.user);
+      else await clearSession();
+    } catch {
+      await clearSession();
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    checkAuth();
-
-    const handleUnauthorized = () => clearSession();
-    window.addEventListener('balaji:unauthorized', handleUnauthorized);
-    return () => window.removeEventListener('balaji:unauthorized', handleUnauthorized);
-  }, []);
+  useEffect(() => { checkAuth(); }, []);
 
   const login = async (phone, password) => {
     try {
       setLoading(true);
       setError(null);
       const data = await authService.login(phone.trim(), password);
-      if (!data?.success || !data?.token || !data?.user) {
-        return { success: false, message: 'Invalid login response' };
-      }
-      localStorage.setItem('token', data.token);
+      if (!data?.success || !data?.user) return { success: false, message: 'Invalid login response' };
       setUser(data.user);
       return { success: true };
     } catch (err) {
-      const message = err.response?.data?.message || (err.code === 'ECONNABORTED' ? 'Server timed out. Please try again.' : 'Login failed');
+      const message = err.message || 'Login failed';
       setError(message);
       return { success: false, message };
     } finally {
@@ -61,14 +51,11 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => clearSession();
+  const logout = async () => { await clearSession(); };
 
   const changePassword = async (oldPassword, newPassword) => {
-    try {
-      return await authService.changePassword(oldPassword, newPassword);
-    } catch (err) {
-      throw new Error(err.response?.data?.message || 'Failed to update password');
-    }
+    try { return await authService.changePassword(oldPassword, newPassword); }
+    catch (err) { throw new Error(err.message || 'Failed to update password'); }
   };
 
   return (

@@ -1,110 +1,85 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { LayoutDashboard, Milk, Users, ShoppingCart, WalletCards, BarChart3, UserCog, Settings, LogOut, ShieldCheck } from 'lucide-react';
 
 const Sidebar = ({ activeTab, setActiveTab }) => {
   const { user, logout } = useAuth();
 
-  const menuItems = [
+  const groups = [
     {
-      id: 'dashboard',
-      name: 'Dashboard',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="10" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-      )
+      title: 'Operations / संचालन',
+      items: [
+        { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
+        { id: 'collection', name: 'Milk Collection', icon: Milk },
+        { id: 'suppliers', name: 'Suppliers / Farmers', icon: Users },
+        { id: 'customerMilk', name: 'Customer Milk Sales', icon: ShoppingCart },
+      ],
     },
     {
-      id: 'collection',
-      name: 'Milk Collection',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-      )
+      title: 'Financials / हिसाब',
+      items: [
+        { id: 'payments', name: 'Payment Ledger', icon: WalletCards },
+        { id: 'reports', name: 'Reports & Analytics', icon: BarChart3 },
+      ],
     },
     {
-      id: 'suppliers',
-      name: 'Suppliers',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      )
+      title: 'Control / नियंत्रण',
+      items: [
+        { id: 'users', name: 'User Management', icon: UserCog },
+        { id: 'settings', name: 'Settings & Audit', icon: Settings },
+      ],
     },
-    {
-      id: 'payments',
-      name: 'Payment Ledger',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
-      )
-    },
-    {
-      id: 'reports',
-      name: 'Reports',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
-      )
-    },
-    {
-      id: 'users',
-      name: 'User Management',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      )
-    },
-    {
-      id: 'settings',
-      name: 'Settings & Logs',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      )
-    }
   ];
 
-  const filteredMenuItems = menuItems.filter((item) => {
-    if (user?.role === 'worker') {
-      return ['dashboard', 'collection', 'suppliers'].includes(item.id);
-    }
-    if (user?.role === 'manager') {
-      return ['dashboard', 'collection', 'suppliers', 'payments', 'reports'].includes(item.id);
-    }
+  const allowed = (id) => {
+    if (user?.role === 'worker') return ['dashboard', 'collection', 'suppliers', 'customerMilk'].includes(id);
+    if (user?.role === 'manager') return ['dashboard', 'collection', 'suppliers', 'customerMilk', 'payments', 'reports'].includes(id);
     return true;
-  });
+  };
 
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="brand-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="28" height="28" className="text-primary-accent"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-        </div>
+        <div className="brand-mark"><Milk size={22} strokeWidth={2.3} /></div>
         <div className="brand-text">
-          <h2>Balaji Dairy</h2>
-          <span>Management System</span>
+          <h2>BALAJI DAIRY</h2>
+          <span>Milk Collection & Billing</span>
         </div>
       </div>
 
+      <div className="sidebar-user-card">
+        <div className="avatar">{user?.name ? user.name[0].toUpperCase() : 'B'}</div>
+        <div className="user-info">
+          <span className="user-name">{user?.name || 'Balaji User'}</span>
+          <span className="user-role">{user?.role === 'owner' ? 'Owner' : user?.role === 'manager' ? 'Manager' : 'Worker'}</span>
+        </div>
+        {user?.role === 'owner' && <ShieldCheck size={17} className="owner-shield" />}
+      </div>
+
       <nav className="sidebar-nav">
-        {filteredMenuItems.map((item) => (
-          <button
-            key={item.id}
-            className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(item.id)}
-          >
-            {item.icon}
-            <span>{item.name}</span>
-          </button>
-        ))}
+        {groups.map((group) => {
+          const visible = group.items.filter((item) => allowed(item.id));
+          if (!visible.length) return null;
+          return (
+            <div className="nav-group" key={group.title}>
+              <div className="nav-group-title">{group.title}</div>
+              {visible.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button key={item.id} className={`nav-item ${activeTab === item.id ? 'active' : ''}`} onClick={() => setActiveTab(item.id)}>
+                    <Icon size={18} strokeWidth={2.1} />
+                    <span>{item.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
       </nav>
 
       <div className="sidebar-footer">
-        <div className="user-profile">
-          <div className="avatar">
-            {user?.name ? user.name[0].toUpperCase() : 'O'}
-          </div>
-          <div className="user-info">
-            <span className="user-name">{user?.name || 'Owner'}</span>
-            <span className="user-role">{user?.role?.toUpperCase() || 'OWNER'}</span>
-          </div>
-        </div>
-        <button className="btn-logout" onClick={logout} title="Sign Out">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-          <span>Logout</span>
-        </button>
+        <button className="btn-logout" onClick={logout}><LogOut size={17} /><span>Logout</span></button>
+        <div className="sidebar-version"><strong>Balaji Dairy</strong><span>Supabase Edition • v2</span></div>
       </div>
     </aside>
   );
