@@ -37,7 +37,11 @@ const connectDB = async () => {
     });
   } catch (error) {
     console.error(`Database Connection Error: ${error.message}`);
-    process.exit(1);
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    } else {
+      console.warn('⚠️ Server will stay running in development mode. Please ensure your IP is whitelisted in MongoDB Atlas or use Supabase.');
+    }
   }
 };
 
