@@ -1,17 +1,34 @@
 -- ==========================================================
 -- BALAJI DAIRY MANAGEMENT SYSTEM — SUPABASE POSTGRESQL SCHEMA
--- PRODUCTION-GRADE MIGRATION & RLS POLICIES
+-- CLEAN PRODUCTION MIGRATION & RLS POLICIES
 -- ==========================================================
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Drop old / conflicting tables cleanly if recreating
+DROP TABLE IF EXISTS public.customer_bills CASCADE;
+DROP TABLE IF EXISTS public.customer_payments CASCADE;
+DROP TABLE IF EXISTS public.customer_deliveries CASCADE;
+DROP TABLE IF EXISTS public.customers CASCADE;
+DROP TABLE IF EXISTS public.supplier_payments CASCADE;
+DROP TABLE IF EXISTS public.milk_entries CASCADE;
+DROP TABLE IF EXISTS public.rate_chart CASCADE;
+DROP TABLE IF EXISTS public.suppliers CASCADE;
+DROP TABLE IF EXISTS public.internal_milk_use CASCADE;
+DROP TABLE IF EXISTS public.expenses CASCADE;
+DROP TABLE IF EXISTS public.milk_reconciliations CASCADE;
+DROP TABLE IF EXISTS public.quality_tests CASCADE;
+DROP TABLE IF EXISTS public.settings CASCADE;
+DROP TABLE IF EXISTS public.audit_logs CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
+
 -- 1. PROFILES & ROLES
-CREATE TABLE IF NOT EXISTS public.profiles (
+CREATE TABLE public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    phone TEXT UNIQUE,
-    email TEXT UNIQUE,
+    name TEXT NOT NULL DEFAULT 'Dairy User',
+    phone TEXT,
+    email TEXT,
     role TEXT NOT NULL DEFAULT 'worker' CHECK (role IN ('owner', 'manager', 'worker')),
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -19,12 +36,12 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 );
 
 -- 2. SETTINGS
-CREATE TABLE IF NOT EXISTS public.settings (
+CREATE TABLE public.settings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     dairy_name TEXT DEFAULT 'BALAJI DAIRY',
     dairy_hindi_name TEXT DEFAULT 'श्री बालाजी डेयरी',
     tagline TEXT DEFAULT 'Fresh Milk & Dairy Products',
-    owner_name TEXT DEFAULT '',
+    owner_name TEXT DEFAULT 'Aditya Kumar',
     phone TEXT DEFAULT '',
     email TEXT DEFAULT '',
     address TEXT DEFAULT '',
@@ -42,7 +59,7 @@ CREATE TABLE IF NOT EXISTS public.settings (
 );
 
 -- 3. SUPPLIERS / FARMERS
-CREATE TABLE IF NOT EXISTS public.suppliers (
+CREATE TABLE public.suppliers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     supplier_code INTEGER UNIQUE NOT NULL,
     supplier_name TEXT NOT NULL,
@@ -52,18 +69,18 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
     joining_date DATE DEFAULT CURRENT_DATE,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     notes TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_suppliers_code ON public.suppliers(supplier_code);
-CREATE INDEX IF NOT EXISTS idx_suppliers_village ON public.suppliers(village);
+CREATE INDEX idx_suppliers_code ON public.suppliers(supplier_code);
+CREATE INDEX idx_suppliers_village ON public.suppliers(village);
 
 -- 4. MILK ENTRIES (COLLECTION)
-CREATE TABLE IF NOT EXISTS public.milk_entries (
+CREATE TABLE public.milk_entries (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    supplier_code INTEGER NOT NULL REFERENCES public.suppliers(supplier_code) ON UPDATE CASCADE,
+    supplier_code INTEGER NOT NULL REFERENCES public.suppliers(supplier_code) ON UPDATE CASCADE ON DELETE CASCADE,
     supplier_name TEXT NOT NULL,
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     shift TEXT NOT NULL CHECK (shift IN ('Morning', 'Evening')),
@@ -74,16 +91,16 @@ CREATE TABLE IF NOT EXISTS public.milk_entries (
     rate NUMERIC(10,2) NOT NULL CHECK (rate >= 0),
     amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
     remarks TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_milk_entries_date_shift ON public.milk_entries(date, shift);
-CREATE INDEX IF NOT EXISTS idx_milk_entries_supplier_date ON public.milk_entries(supplier_code, date);
+CREATE INDEX idx_milk_entries_date_shift ON public.milk_entries(date, shift);
+CREATE INDEX idx_milk_entries_supplier_date ON public.milk_entries(supplier_code, date);
 
 -- 5. RATE CHART
-CREATE TABLE IF NOT EXISTS public.rate_chart (
+CREATE TABLE public.rate_chart (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     fat NUMERIC(4,2) NOT NULL,
     snf NUMERIC(4,2) NOT NULL,
@@ -94,26 +111,26 @@ CREATE TABLE IF NOT EXISTS public.rate_chart (
     UNIQUE(fat, snf, effective_date)
 );
 
-CREATE INDEX IF NOT EXISTS idx_rate_chart_fat_snf ON public.rate_chart(fat, snf);
+CREATE INDEX idx_rate_chart_fat_snf ON public.rate_chart(fat, snf);
 
 -- 6. SUPPLIER PAYMENTS
-CREATE TABLE IF NOT EXISTS public.supplier_payments (
+CREATE TABLE public.supplier_payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    supplier_code INTEGER NOT NULL REFERENCES public.suppliers(supplier_code) ON UPDATE CASCADE,
+    supplier_code INTEGER NOT NULL REFERENCES public.suppliers(supplier_code) ON UPDATE CASCADE ON DELETE CASCADE,
     supplier_name TEXT NOT NULL,
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     amount_paid NUMERIC(12,2) NOT NULL CHECK (amount_paid > 0),
     payment_mode TEXT NOT NULL DEFAULT 'Cash' CHECK (payment_mode IN ('Cash', 'Bank Transfer', 'UPI', 'Cheque')),
     reference_number TEXT DEFAULT '',
     remarks TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_sup_payments_code_date ON public.supplier_payments(supplier_code, date);
+CREATE INDEX idx_sup_payments_code_date ON public.supplier_payments(supplier_code, date);
 
 -- 7. CUSTOMERS MASTER
-CREATE TABLE IF NOT EXISTS public.customers (
+CREATE TABLE public.customers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     customer_code INTEGER UNIQUE NOT NULL,
     customer_name TEXT NOT NULL,
@@ -130,17 +147,17 @@ CREATE TABLE IF NOT EXISTS public.customers (
     start_date DATE DEFAULT CURRENT_DATE,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     notes TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_customers_code ON public.customers(customer_code);
+CREATE INDEX idx_customers_code ON public.customers(customer_code);
 
 -- 8. CUSTOMER DELIVERIES (ROUTE SHEET)
-CREATE TABLE IF NOT EXISTS public.customer_deliveries (
+CREATE TABLE public.customer_deliveries (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    customer_code INTEGER NOT NULL REFERENCES public.customers(customer_code) ON UPDATE CASCADE,
+    customer_code INTEGER NOT NULL REFERENCES public.customers(customer_code) ON UPDATE CASCADE ON DELETE CASCADE,
     customer_name TEXT NOT NULL,
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     shift TEXT NOT NULL CHECK (shift IN ('Morning', 'Evening')),
@@ -150,19 +167,19 @@ CREATE TABLE IF NOT EXISTS public.customer_deliveries (
     amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
     status TEXT NOT NULL DEFAULT 'Delivered' CHECK (status IN ('Delivered', 'Skipped', 'Returned', 'Changed Qty')),
     remarks TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(customer_code, date, shift)
 );
 
-CREATE INDEX IF NOT EXISTS idx_cust_del_date_shift ON public.customer_deliveries(date, shift);
-CREATE INDEX IF NOT EXISTS idx_cust_del_code_date ON public.customer_deliveries(customer_code, date);
+CREATE INDEX idx_cust_del_date_shift ON public.customer_deliveries(date, shift);
+CREATE INDEX idx_cust_del_code_date ON public.customer_deliveries(customer_code, date);
 
 -- 9. CUSTOMER PAYMENTS
-CREATE TABLE IF NOT EXISTS public.customer_payments (
+CREATE TABLE public.customer_payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    customer_code INTEGER NOT NULL REFERENCES public.customers(customer_code) ON UPDATE CASCADE,
+    customer_code INTEGER NOT NULL REFERENCES public.customers(customer_code) ON UPDATE CASCADE ON DELETE CASCADE,
     customer_name TEXT NOT NULL,
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     amount_paid NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -170,17 +187,17 @@ CREATE TABLE IF NOT EXISTS public.customer_payments (
     payment_mode TEXT NOT NULL DEFAULT 'Cash' CHECK (payment_mode IN ('Cash', 'UPI', 'Bank Transfer', 'Cheque')),
     reference_number TEXT DEFAULT '',
     remarks TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_cust_payments_code_date ON public.customer_payments(customer_code, date);
+CREATE INDEX idx_cust_payments_code_date ON public.customer_payments(customer_code, date);
 
 -- 10. CUSTOMER BILLS (INVOICES)
-CREATE TABLE IF NOT EXISTS public.customer_bills (
+CREATE TABLE public.customer_bills (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     bill_number TEXT UNIQUE NOT NULL,
-    customer_code INTEGER NOT NULL REFERENCES public.customers(customer_code) ON UPDATE CASCADE,
+    customer_code INTEGER NOT NULL REFERENCES public.customers(customer_code) ON UPDATE CASCADE ON DELETE CASCADE,
     customer_name TEXT NOT NULL,
     mobile TEXT DEFAULT '',
     village TEXT DEFAULT '',
@@ -195,12 +212,12 @@ CREATE TABLE IF NOT EXISTS public.customer_bills (
     final_payable NUMERIC(12,2) NOT NULL,
     status TEXT NOT NULL DEFAULT 'Unpaid' CHECK (status IN ('Paid', 'Unpaid', 'Partially Paid')),
     notes TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 11. INTERNAL MILK USE
-CREATE TABLE IF NOT EXISTS public.internal_milk_use (
+CREATE TABLE public.internal_milk_use (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     shift TEXT NOT NULL CHECK (shift IN ('Morning', 'Evening')),
@@ -208,14 +225,14 @@ CREATE TABLE IF NOT EXISTS public.internal_milk_use (
     quantity NUMERIC(10,2) NOT NULL CHECK (quantity > 0),
     product_yield_kg NUMERIC(8,2) DEFAULT 0,
     notes TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_internal_use_date ON public.internal_milk_use(date);
+CREATE INDEX idx_internal_use_date ON public.internal_milk_use(date);
 
 -- 12. EXPENSES
-CREATE TABLE IF NOT EXISTS public.expenses (
+CREATE TABLE public.expenses (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     category TEXT NOT NULL CHECK (category IN ('LPG', 'Electricity', 'Diesel', 'Transport', 'Labour', 'Repairs', 'Packaging', 'Cleaning', 'Milk Testing', 'Maintenance', 'Miscellaneous')),
@@ -223,14 +240,14 @@ CREATE TABLE IF NOT EXISTS public.expenses (
     payment_mode TEXT NOT NULL DEFAULT 'Cash' CHECK (payment_mode IN ('Cash', 'UPI', 'Bank Transfer', 'Cheque')),
     reference_number TEXT DEFAULT '',
     description TEXT DEFAULT '',
-    created_by UUID REFERENCES public.profiles(id),
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_expenses_date ON public.expenses(date);
+CREATE INDEX idx_expenses_date ON public.expenses(date);
 
 -- 13. MILK RECONCILIATION
-CREATE TABLE IF NOT EXISTS public.milk_reconciliations (
+CREATE TABLE public.milk_reconciliations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     shift TEXT NOT NULL DEFAULT 'Full Day' CHECK (shift IN ('Morning', 'Evening', 'Full Day')),
@@ -246,15 +263,15 @@ CREATE TABLE IF NOT EXISTS public.milk_reconciliations (
     variance NUMERIC(10,2) DEFAULT 0,
     is_reconciled BOOLEAN DEFAULT true,
     notes TEXT DEFAULT '',
-    verified_by UUID REFERENCES public.profiles(id),
+    verified_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(date, shift)
 );
 
 -- 14. QUALITY TESTS
-CREATE TABLE IF NOT EXISTS public.quality_tests (
+CREATE TABLE public.quality_tests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    supplier_code INTEGER REFERENCES public.suppliers(supplier_code) ON UPDATE CASCADE,
+    supplier_code INTEGER REFERENCES public.suppliers(supplier_code) ON UPDATE CASCADE ON DELETE CASCADE,
     supplier_name TEXT DEFAULT '',
     date DATE NOT NULL DEFAULT CURRENT_DATE,
     shift TEXT DEFAULT 'Morning' CHECK (shift IN ('Morning', 'Evening')),
@@ -270,12 +287,12 @@ CREATE TABLE IF NOT EXISTS public.quality_tests (
     neutralizer_test BOOLEAN DEFAULT false,
     status TEXT DEFAULT 'Passed' CHECK (status IN ('Passed', 'Failed', 'Suspect')),
     remarks TEXT DEFAULT '',
-    tested_by UUID REFERENCES public.profiles(id),
+    tested_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 15. AUDIT LOGS
-CREATE TABLE IF NOT EXISTS public.audit_logs (
+CREATE TABLE public.audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_name TEXT NOT NULL,
     action TEXT NOT NULL,
@@ -284,7 +301,7 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
     timestamp TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON public.audit_logs(timestamp DESC);
+CREATE INDEX idx_audit_timestamp ON public.audit_logs(timestamp DESC);
 
 -- ==========================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -355,7 +372,7 @@ CREATE POLICY "Only owners and managers can access reconciliation"
 ON public.milk_reconciliations FOR ALL TO authenticated
 USING (public.get_user_role() IN ('owner', 'manager'));
 
-CREATE POLICY "Only owners can manage profiles and audit logs"
+CREATE POLICY "Only owners can manage profiles"
 ON public.profiles FOR ALL TO authenticated
 USING (public.get_user_role() = 'owner');
 
@@ -379,7 +396,7 @@ BEGIN
     COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1), 'Dairy Operator'),
     NEW.email,
     NEW.phone,
-    'owner', -- Default to owner for first project setup
+    'owner',
     'active'
   )
   ON CONFLICT (id) DO UPDATE
@@ -399,8 +416,7 @@ CREATE TRIGGER on_auth_user_created
 
 -- Default Settings
 INSERT INTO public.settings (dairy_name, dairy_hindi_name, tagline, owner_name, default_cow_rate, default_buffalo_rate)
-VALUES ('BALAJI DAIRY', 'श्री बालाजी डेयरी', 'Fresh Milk & Dairy Products', 'Aditya Kumar', 45, 65)
-ON CONFLICT DO NOTHING;
+VALUES ('BALAJI DAIRY', 'श्री बालाजी डेयरी', 'Fresh Milk & Dairy Products', 'Aditya Kumar', 45, 65);
 
 -- Initial Farmers
 INSERT INTO public.suppliers (supplier_code, supplier_name, father_name, mobile, village, status)
@@ -408,8 +424,7 @@ VALUES
   (101, 'Ramesh Patel', 'Harish Patel', '9988776655', 'Viramgam', 'active'),
   (102, 'Sanjay Kumar', 'Mohan Lal', '8877665544', 'Rampur', 'active'),
   (103, 'Mahendra Singh', 'Vikram Singh', '7766554433', 'Viramgam', 'active'),
-  (104, 'Rajesh Solanki', 'Babubhai', '6655443322', 'Sanand', 'active')
-ON CONFLICT (supplier_code) DO NOTHING;
+  (104, 'Rajesh Solanki', 'Babubhai', '6655443322', 'Sanand', 'active');
 
 -- Initial Customers
 INSERT INTO public.customers (customer_code, customer_name, mobile, village, customer_type, milk_type, morning_default_qty, evening_default_qty, default_rate, billing_cycle, status)
@@ -417,5 +432,4 @@ VALUES
   (1, 'Gopal Dairy & Sweets', '9876500001', 'Main Bazaar', 'Sweet Shop', 'Buffalo', 15.0, 10.0, 65, 'Monthly', 'active'),
   (2, 'Shree Krishna Hotel', '9876500002', 'Station Road', 'Hotel', 'Cow', 10.0, 5.0, 48, '10-day', 'active'),
   (3, 'Suresh Sharma', '9876500003', 'Sector 4', 'Household', 'Mixed', 2.0, 1.0, 55, 'Monthly', 'active'),
-  (4, 'Anita Devi', '9876500004', 'Sector 7', 'Household', 'Cow', 1.5, 0.0, 50, 'Monthly', 'active')
-ON CONFLICT (customer_code) DO NOTHING;
+  (4, 'Anita Devi', '9876500004', 'Sector 7', 'Household', 'Cow', 1.5, 0.0, 50, 'Monthly', 'active');
