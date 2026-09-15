@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LayoutDashboard, Milk, Users, WalletCards, BarChart3, UserCog, Settings, LogOut, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Milk, Users, ShoppingCart, WalletCards, BarChart3, UserCog, Settings, LogOut, ShieldCheck } from 'lucide-react';
 
 const Sidebar = ({ activeTab, setActiveTab }) => {
   const { user, logout } = useAuth();
@@ -12,6 +12,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
         { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
         { id: 'collection', name: 'Milk Collection', icon: Milk },
         { id: 'suppliers', name: 'Suppliers / Farmers', icon: Users },
+        { id: 'customerMilk', name: 'Customer Milk Sales', icon: ShoppingCart },
       ],
     },
     {
@@ -31,8 +32,8 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
   ];
 
   const allowed = (id) => {
-    if (user?.role === 'worker') return ['dashboard', 'collection', 'suppliers'].includes(id);
-    if (user?.role === 'manager') return ['dashboard', 'collection', 'suppliers', 'payments', 'reports'].includes(id);
+    if (user?.role === 'worker') return ['dashboard', 'collection', 'suppliers', 'customerMilk'].includes(id);
+    if (user?.role === 'manager') return ['dashboard', 'collection', 'suppliers', 'customerMilk', 'payments', 'reports'].includes(id);
     return true;
   };
 
