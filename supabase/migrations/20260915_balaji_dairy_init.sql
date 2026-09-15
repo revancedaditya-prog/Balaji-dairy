@@ -359,6 +359,63 @@ CREATE POLICY "Only owners can manage profiles and audit logs"
 ON public.profiles FOR ALL TO authenticated
 USING (public.get_user_role() = 'owner');
 
+CREATE POLICY "Allow users to read their own profile"
+ON public.profiles FOR SELECT TO authenticated
+USING (id = auth.uid());
+
 CREATE POLICY "Only owners can view audit logs"
 ON public.audit_logs FOR SELECT TO authenticated
 USING (public.get_user_role() = 'owner');
+
+-- ==========================================================
+-- AUTOMATIC PROFILE CREATION TRIGGER
+-- ==========================================================
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, name, email, phone, role, status)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1), 'Dairy Operator'),
+    NEW.email,
+    NEW.phone,
+    'owner', -- Default to owner for first project setup
+    'active'
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET email = EXCLUDED.email;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ==========================================================
+-- INITIAL DEFAULT SEED DATA
+-- ==========================================================
+
+-- Default Settings
+INSERT INTO public.settings (dairy_name, dairy_hindi_name, tagline, owner_name, default_cow_rate, default_buffalo_rate)
+VALUES ('BALAJI DAIRY', 'श्री बालाजी डेयरी', 'Fresh Milk & Dairy Products', 'Aditya Kumar', 45, 65)
+ON CONFLICT DO NOTHING;
+
+-- Initial Farmers
+INSERT INTO public.suppliers (supplier_code, supplier_name, father_name, mobile, village, status)
+VALUES 
+  (101, 'Ramesh Patel', 'Harish Patel', '9988776655', 'Viramgam', 'active'),
+  (102, 'Sanjay Kumar', 'Mohan Lal', '8877665544', 'Rampur', 'active'),
+  (103, 'Mahendra Singh', 'Vikram Singh', '7766554433', 'Viramgam', 'active'),
+  (104, 'Rajesh Solanki', 'Babubhai', '6655443322', 'Sanand', 'active')
+ON CONFLICT (supplier_code) DO NOTHING;
+
+-- Initial Customers
+INSERT INTO public.customers (customer_code, customer_name, mobile, village, customer_type, milk_type, morning_default_qty, evening_default_qty, default_rate, billing_cycle, status)
+VALUES 
+  (1, 'Gopal Dairy & Sweets', '9876500001', 'Main Bazaar', 'Sweet Shop', 'Buffalo', 15.0, 10.0, 65, 'Monthly', 'active'),
+  (2, 'Shree Krishna Hotel', '9876500002', 'Station Road', 'Hotel', 'Cow', 10.0, 5.0, 48, '10-day', 'active'),
+  (3, 'Suresh Sharma', '9876500003', 'Sector 4', 'Household', 'Mixed', 2.0, 1.0, 55, 'Monthly', 'active'),
+  (4, 'Anita Devi', '9876500004', 'Sector 7', 'Household', 'Cow', 1.5, 0.0, 50, 'Monthly', 'active')
+ON CONFLICT (customer_code) DO NOTHING;
