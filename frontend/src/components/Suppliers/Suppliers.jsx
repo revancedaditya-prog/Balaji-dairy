@@ -1,22 +1,49 @@
-import React, { useState, useEffect } from 'react';
-import { supplierService } from '../../services/api';
-import { useAuth } from '../../context/AuthContext';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Users,
+  Plus,
+  Search,
+  Download,
+  Filter,
+  Eye,
+  Edit2,
+  Trash2,
+  Phone,
+  MapPin,
+  Calendar,
+  CreditCard,
+  Milk,
+  BookOpen,
+  ArrowRight,
+  FileSpreadsheet,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Printer
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Card, Button, Input, Badge, Modal, EmptyState, Loading } from '../Common/MaterialComponents';
+import { supplierService, paymentService, milkEntryService } from '../../services/api';
+import { PageHeader, SearchInput, Modal, ConfirmationDialog, Currency, Quantity, StatusBadge } from '../Common/UIComponents';
+import { useToast } from '../Common/Toast';
+import { useAuth } from '../../context/AuthContext';
+import { generateSupplierWhatsAppText, openWhatsApp } from '../../utils/whatsapp';
 
 const Suppliers = () => {
   const { user } = useAuth();
-  const [suppliers, setSuppliers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [village, setVillage] = useState('');
-  const [status, setStatus] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const { showSuccess, showError, showWarning } = useToast();
 
-  // Form State
+  const [loading, setLoading] = useState(false);
+  const [suppliers, setSuppliers] = useState([]);
+  const [villages, setVillages] = useState([]);
+
+  // Filters
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedVillage, setSelectedVillage] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  // Add / Edit Modal
   const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState(null);
+  const [editingSupplier, setEditingSupplier] = useState(null);
   const [formData, setFormData] = useState({
     supplierCode: '',
     supplierName: '',
@@ -24,559 +51,545 @@ const Suppliers = () => {
     mobile: '',
     village: '',
     status: 'active',
-    joiningDate: new Date().toISOString().split('T')[0]
   });
 
-  const loadSuppliers = async () => {
+  // Supplier Profile 360 View Modal
+  const [selectedProfile, setSelectedProfile] = useState(null);
+  const [profileTab, setProfileTab] = useState('overview'); // overview | milk | payments | ledger
+  const [profileLedger, setProfileLedger] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Delete Dialog
+  const [deleteId, setDeleteId] = useState(null);
+
+  const fetchSuppliers = useCallback(async () => {
     try {
       setLoading(true);
-      setError('');
-      const res = await supplierService.getSuppliers({ search, village, status });
+      const res = await supplierService.getSuppliers();
       if (res.success) {
         setSuppliers(res.data);
+        const uniqueVillages = [...new Set(res.data.map((s) => s.village).filter(Boolean))];
+        setVillages(uniqueVillages);
       }
     } catch (err) {
-      setError('Failed to fetch suppliers');
       console.error(err);
+      showError('Failed to load suppliers directory');
     } finally {
       setLoading(false);
     }
-  };
+  }, [showError]);
 
   useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      loadSuppliers();
-    }, 300);
+    fetchSuppliers();
+  }, [fetchSuppliers]);
 
-    return () => clearTimeout(delayDebounce);
-  }, [search, village, status]);
+  // Filtered list
+  const filteredSuppliers = suppliers.filter((s) => {
+    const matchesSearch =
+      !searchTerm ||
+      String(s.supplierCode).includes(searchTerm) ||
+      s.supplierName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (s.mobile && s.mobile.includes(searchTerm)) ||
+      (s.village && s.village.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
+    const matchesVillage = !selectedVillage || s.village === selectedVillage;
+    const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
+
+    return matchesSearch && matchesVillage && matchesStatus;
+  });
+
+  // Open Add Modal
+  const handleOpenAdd = () => {
+    const maxCode = suppliers.reduce((max, s) => (s.supplierCode > max ? s.supplierCode : max), 0);
+    setEditingSupplier(null);
     setFormData({
-      ...formData,
-      [name]: value
-    });
-  };
-
-  const resetForm = () => {
-    setFormData({
-      supplierCode: '',
+      supplierCode: maxCode + 1,
       supplierName: '',
       fatherName: '',
       mobile: '',
-      village: '',
+      village: villages[0] || '',
       status: 'active',
-      joiningDate: new Date().toISOString().split('T')[0]
-    });
-    setEditingId(null);
-    setShowModal(false);
-  };
-
-  const handleEdit = (supplier) => {
-    setEditingId(supplier._id);
-    setFormData({
-      supplierCode: supplier.supplierCode,
-      supplierName: supplier.supplierName,
-      fatherName: supplier.fatherName || '',
-      mobile: supplier.mobile || '',
-      village: supplier.village,
-      status: supplier.status,
-      joiningDate: supplier.joiningDate ? supplier.joiningDate.split('T')[0] : new Date().toISOString().split('T')[0]
     });
     setShowModal(true);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
-
-    const payload = { ...formData };
-    if (!payload.joiningDate) {
-      delete payload.joiningDate;
-    }
-
-    try {
-      if (editingId) {
-        const res = await supplierService.updateSupplier(editingId, payload);
-        if (res.success) {
-          setSuccess('Supplier updated successfully');
-          loadSuppliers();
-          resetForm();
-        }
-      } else {
-        const res = await supplierService.addSupplier(payload);
-        if (res.success) {
-          setSuccess('Supplier added successfully');
-          loadSuppliers();
-          resetForm();
-        }
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Action failed. Please check Supplier Code uniqueness.');
-      console.error(err);
-    }
+  // Open Edit Modal
+  const handleOpenEdit = (sup) => {
+    setEditingSupplier(sup);
+    setFormData({
+      supplierCode: sup.supplierCode,
+      supplierName: sup.supplierName,
+      fatherName: sup.fatherName || '',
+      mobile: sup.mobile || '',
+      village: sup.village || '',
+      status: sup.status || 'active',
+    });
+    setShowModal(true);
   };
 
-  const handleDelete = async (id, code) => {
-    if (!window.confirm(`Are you sure you want to delete Supplier Code #${code}?`)) {
+  // Submit Supplier Form
+  const handleSubmitForm = async (e) => {
+    e.preventDefault();
+    if (!formData.supplierName.trim() || !formData.supplierCode) {
+      showWarning('Please provide Farmer Name and Code');
       return;
     }
-    setError('');
-    setSuccess('');
+
     try {
-      const res = await supplierService.deleteSupplier(id);
-      if (res.success) {
-        setSuccess(`Supplier #${code} deleted successfully`);
-        loadSuppliers();
+      if (editingSupplier) {
+        const res = await supplierService.updateSupplier(editingSupplier._id, formData);
+        if (res.success) {
+          showSuccess(`Updated farmer #${formData.supplierCode} ${formData.supplierName}`);
+        }
+      } else {
+        const res = await supplierService.addSupplier(formData);
+        if (res.success) {
+          showSuccess(`Added new farmer #${formData.supplierCode} ${formData.supplierName}`);
+        }
       }
+      setShowModal(false);
+      fetchSuppliers();
     } catch (err) {
-      setError('Failed to delete supplier');
-      console.error(err);
+      showError(err.response?.data?.message || 'Failed to save farmer profile');
     }
   };
 
-  // Excel Export
-  const exportToExcel = () => {
-    const formattedData = suppliers.map((s) => ({
+  // Open 360° Profile
+  const handleOpenProfile = async (sup) => {
+    setSelectedProfile(sup);
+    setProfileTab('overview');
+    setProfileLoading(true);
+    try {
+      const res = await paymentService.getSupplierLedger(sup.supplierCode);
+      if (res.success) {
+        setProfileLedger(res);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  // Export Excel
+  const handleExportExcel = () => {
+    if (filteredSuppliers.length === 0) {
+      showWarning('No suppliers to export');
+      return;
+    }
+
+    const data = filteredSuppliers.map((s) => ({
       'Supplier Code': s.supplierCode,
-      'Supplier Name': s.supplierName,
-      'Father Name': s.fatherName,
-      'Mobile Number': s.mobile,
-      'Village': s.village,
-      'Status': s.status.toUpperCase(),
-      'Joining Date': new Date(s.joiningDate).toLocaleDateString('en-IN')
+      'Farmer Name': s.supplierName,
+      'Father Name': s.fatherName || '',
+      Mobile: s.mobile || '',
+      Village: s.village || '',
+      Status: s.status,
+      'Joining Date': s.joiningDate ? new Date(s.joiningDate).toLocaleDateString('en-IN') : '',
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(formattedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Suppliers');
-    XLSX.writeFile(workbook, `Suppliers_List_${new Date().toISOString().split('T')[0]}.xlsx`);
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Farmers');
+    XLSX.writeFile(wb, `Balaji_Dairy_Farmers_${new Date().toISOString().split('T')[0]}.xlsx`);
+    showSuccess('Exported farmers directory to Excel');
   };
 
-  // PDF Export
-  const exportToPDF = () => {
-    const printContent = `
-      <html>
-        <head>
-          <title>Suppliers List - Balaji Dairy</title>
-          <style>
-            body { font-family: sans-serif; padding: 20px; color: #333; }
-            h2 { text-align: center; color: #1e40af; margin-bottom: 5px; }
-            h4 { text-align: center; font-weight: normal; margin-top: 0; color: #666; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
-            th { background-color: #f3f4f6; color: #4b5563; font-weight: bold; border: 1px solid #d1d5db; padding: 8px; text-align: left; }
-            td { border: 1px solid #e5e7eb; padding: 8px; }
-            tr:nth-child(even) { background-color: #f9fafb; }
-            .status-active { color: green; font-weight: bold; }
-            .status-inactive { color: red; font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <h2>BALAJI DAIRY MANAGEMENT SYSTEM</h2>
-          <h4>SUPPLIERS DIRECTORY - LOGGED ON ${new Date().toLocaleDateString('en-IN')}</h4>
-          <table>
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Supplier Name</th>
-                <th>Father's Name</th>
-                <th>Mobile</th>
-                <th>Village</th>
-                <th>Status</th>
-                <th>Joining Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${suppliers.map(s => `
-                <tr>
-                  <td><b>#${s.supplierCode}</b></td>
-                  <td>${s.supplierName}</td>
-                  <td>${s.fatherName}</td>
-                  <td>${s.mobile}</td>
-                  <td>${s.village}</td>
-                  <td class="status-${s.status}">${s.status.toUpperCase()}</td>
-                  <td>${new Date(s.joiningDate).toLocaleDateString('en-IN')}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `;
-
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
-  };
-
-  const downloadTemplate = () => {
-    const templateData = [
-      {
-        'Supplier Code': 105,
-        'Supplier Name': 'Amit Patel',
-        'Father Name': 'Kantilal Patel',
-        'Mobile Number': '9876543211',
-        'Village': 'Viramgam',
-        'Status': 'active',
-        'Joining Date': '2026-06-02'
+  const handleDeleteSupplier = async () => {
+    if (!deleteId) return;
+    try {
+      const res = await supplierService.deleteSupplier(deleteId);
+      if (res.success) {
+        showSuccess('Farmer deleted successfully');
+        setDeleteId(null);
+        fetchSuppliers();
       }
-    ];
-    const worksheet = XLSX.utils.json_to_sheet(templateData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
-    XLSX.writeFile(workbook, 'Supplier_Import_Template.xlsx');
-  };
-
-  const handleExcelUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rawData = XLSX.utils.sheet_to_json(sheet);
-
-        if (rawData.length === 0) {
-          setError('Excel file is empty');
-          return;
-        }
-
-        const mappedSuppliers = rawData.map((row) => {
-          const findVal = (patterns) => {
-            const key = Object.keys(row).find((k) => 
-              patterns.some((p) => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(p))
-            );
-            return key ? row[key] : '';
-          };
-
-          return {
-            supplierCode: findVal(['suppliercode', 'code', 'number']),
-            supplierName: findVal(['suppliername', 'farmername', 'name']),
-            fatherName: findVal(['fathername', 'fathersname', 'father']),
-            mobile: findVal(['mobile', 'phone', 'mobilenumber', 'contact']),
-            village: findVal(['village', 'city', 'town']),
-            status: findVal(['status']) || 'active',
-            joiningDate: findVal(['joiningdate', 'date', 'joined']),
-          };
-        });
-
-        setLoading(true);
-        setError('');
-        setSuccess('');
-
-        const res = await supplierService.bulkUpload(mappedSuppliers);
-        if (res.success) {
-          let msg = `Successfully uploaded ${res.insertedCount} suppliers.`;
-          if (res.skippedCount > 0) {
-            msg += ` Skipped ${res.skippedCount} duplicates/invalid rows.`;
-          }
-          setSuccess(msg);
-          loadSuppliers();
-        }
-      } catch (err) {
-        setError(err.response?.data?.message || 'Failed to parse or upload Excel file');
-        console.error(err);
-      } finally {
-        setLoading(false);
-        e.target.value = '';
-      }
-    };
-    reader.readAsArrayBuffer(file);
+    } catch (err) {
+      showError(err.response?.data?.message || 'Failed to delete farmer');
+    }
   };
 
   return (
-    <div className="suppliers-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
-      {success && <div className="success-alert" style={{ marginBottom: '1rem' }}>{success}</div>}
-      {error && <div className="error-alert" style={{ marginBottom: '1rem' }}>{error}</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Header */}
+      <PageHeader
+        title="Farmers & Suppliers"
+        hindiTitle="किसान / सप्लायर डायरेक्टरी"
+        subtitle="Manage registered milk producers, profile cards, village groups, and 360° transaction history."
+        actions={
+          <div style={{ display: 'flex', gap: '0.65rem' }}>
+            <button onClick={handleExportExcel} className="btn btn-secondary btn-sm">
+              <Download size={14} />
+              <span>Export Excel</span>
+            </button>
+            <button onClick={handleOpenAdd} className="btn btn-accent btn-sm" style={{ fontWeight: 800 }}>
+              <Plus size={16} strokeWidth={3} />
+              <span>+ Add Farmer</span>
+            </button>
+          </div>
+        }
+      />
 
-      {/* Search and Filters */}
-      <Card style={{ padding: '1rem', marginBottom: '1rem' }}>
-        <div className="grid grid-cols-3" style={{ gap: '0.75rem' }}>
-          <Input
-            label="Search Farmer"
-            type="text"
-            placeholder="Search by Code or Name..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <Input
-            label="Filter by Village"
-            type="text"
-            placeholder="Village name..."
-            value={village}
-            onChange={(e) => setVillage(e.target.value)}
-          />
-          <div>
-            <label className="input-md3-label">Filter by Status</label>
-            <select className="input-md3-control" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">All Statuses</option>
-              <option value="active">Active</option>
+      {/* Filter & Search Bar */}
+      <div className="card" style={{ padding: '1rem' }}>
+        <div style={{ display: 'flex', gap: '0.85rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: '220px' }}>
+            <SearchInput
+              value={searchTerm}
+              onChange={setSearchTerm}
+              placeholder="Search by code, farmer name, phone, or village..."
+            />
+          </div>
+
+          <div style={{ minWidth: '160px' }}>
+            <select
+              className="form-control"
+              value={selectedVillage}
+              onChange={(e) => setSelectedVillage(e.target.value)}
+              style={{ height: '40px' }}
+            >
+              <option value="">All Villages ({villages.length})</option>
+              {villages.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ minWidth: '130px' }}>
+            <select
+              className="form-control"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{ height: '40px' }}
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active Only</option>
               <option value="inactive">Inactive</option>
             </select>
           </div>
         </div>
-
-        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
-          {user?.role !== 'worker' && (
-            <>
-              <Button variant="outlined" onClick={downloadTemplate} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Download Template</Button>
-              <Button variant="outlined" onClick={() => document.getElementById('excel-file-input').click()} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Import Excel</Button>
-              <input
-                type="file"
-                id="excel-file-input"
-                accept=".xlsx, .xls"
-                onChange={handleExcelUpload}
-                style={{ display: 'none' }}
-              />
-            </>
-          )}
-          <Button variant="outlined" onClick={exportToExcel} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Export Excel</Button>
-          <Button variant="outlined" onClick={exportToPDF} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>PDF Print</Button>
-          
-          {/* Desktop Only Add button */}
-          {user?.role !== 'worker' && (
-            <Button variant="primary" className="desktop-only" onClick={() => setShowModal(true)} style={{ marginLeft: 'auto', minHeight: '40px', padding: '0.5rem 1.25rem' }}>
-              Add Supplier
-            </Button>
-          )}
-        </div>
-      </Card>
-
-      {/* Mobile Floating Action Button (FAB) */}
-      {user?.role !== 'worker' && (
-        <button 
-          className="fab-md3 mobile-only" 
-          onClick={() => setShowModal(true)}
-          aria-label="Add Supplier"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
-        </button>
-      )}
-
-      {/* Desktop List View */}
-      <Card style={{ padding: '1rem' }} className="desktop-only">
-        <div className="table-container">
-          {loading ? (
-            <Loading label="Fetching supplier list..." />
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Supplier Name</th>
-                  <th>Father Name</th>
-                  <th>Mobile Number</th>
-                  <th>Village</th>
-                  <th>Status</th>
-                  <th>Joining Date</th>
-                  {user?.role !== 'worker' && <th style={{ textAlign: 'right' }}>Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {suppliers.length > 0 ? (
-                  suppliers.map((s) => (
-                    <tr key={s._id}>
-                      <td style={{ fontWeight: '600' }}>#{s.supplierCode}</td>
-                      <td>{s.supplierName}</td>
-                      <td>{s.fatherName}</td>
-                      <td>{s.mobile}</td>
-                      <td>{s.village}</td>
-                      <td>
-                        <Badge type={s.status === 'active' ? 'success' : 'error'}>
-                          {s.status}
-                        </Badge>
-                      </td>
-                      <td>{new Date(s.joiningDate).toLocaleDateString('en-IN')}</td>
-                      {user?.role !== 'worker' && (
-                        <td style={{ textAlign: 'right' }}>
-                          <Button
-                            variant="outlined"
-                            style={{ padding: '0.25rem 0.5rem', marginRight: '0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
-                            onClick={() => handleEdit(s)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            variant="danger"
-                            style={{ padding: '0.25rem 0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
-                            onClick={() => handleDelete(s._id, s.supplierCode)}
-                          >
-                            Delete
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan="8" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
-                      No matching suppliers found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </Card>
-
-      {/* Mobile Card List View */}
-      <div className="mobile-card-list mobile-only">
-        {loading ? (
-          <Loading label="Fetching supplier list..." />
-        ) : suppliers.length > 0 ? (
-          suppliers.map((s) => (
-            <div key={s._id} className="mobile-row-card" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
-              <div className="mobile-row-card-header">
-                <div className="mobile-row-card-title">
-                  <Badge type="primary" style={{ marginRight: '0.5rem' }}>#{s.supplierCode}</Badge>
-                  {s.supplierName}
-                </div>
-                <Badge type={s.status === 'active' ? 'success' : 'error'}>
-                  {s.status}
-                </Badge>
-              </div>
-              <div className="mobile-row-card-body">
-                {s.fatherName && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                    <span>Father's Name:</span>
-                    <span>{s.fatherName}</span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                  <span>Village:</span>
-                  <span style={{ fontWeight: '500' }}>{s.village}</span>
-                </div>
-                {s.mobile && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                    <span>Mobile:</span>
-                    <a href={`tel:${s.mobile}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none', color: 'var(--md-sys-color-primary)', fontWeight: '600' }}>
-                      {s.mobile}
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 9.92z"/></svg>
-                    </a>
-                  </div>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '0.25rem' }}>
-                  <span>Joined:</span>
-                  <span>{new Date(s.joiningDate).toLocaleDateString('en-IN')}</span>
-                </div>
-              </div>
-              {user?.role !== 'worker' && (
-                <div className="mobile-row-card-actions">
-                  <Button
-                    variant="outlined"
-                    style={{ padding: '0.25rem 0.75rem', minHeight: '36px', fontSize: '0.8rem' }}
-                    onClick={() => handleEdit(s)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="danger"
-                    style={{ padding: '0.25rem 0.75rem', minHeight: '36px', fontSize: '0.8rem' }}
-                    onClick={() => handleDelete(s._id, s.supplierCode)}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              )}
-            </div>
-          ))
-        ) : (
-          <EmptyState message="No farmers registered match the filter search criteria" />
-        )}
       </div>
 
-      {/* Register/Edit Modal Dialog */}
+      {/* Farmers Master Table */}
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-primary)' }}>
+            Registered Farmers ({filteredSuppliers.length})
+          </h3>
+        </div>
+
+        <div className="table-responsive">
+          <table className="dairy-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Farmer Name</th>
+                <th>Father's Name</th>
+                <th>Village</th>
+                <th>Mobile</th>
+                <th>Status</th>
+                <th>Joined</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSuppliers.length > 0 ? (
+                filteredSuppliers.map((sup) => (
+                  <tr key={sup._id}>
+                    <td>
+                      <span className="badge badge-gold font-mono-num">#{sup.supplierCode}</span>
+                    </td>
+                    <td style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                      {sup.supplierName}
+                    </td>
+                    <td style={{ color: 'var(--color-text-secondary)' }}>
+                      {sup.fatherName || '—'}
+                    </td>
+                    <td>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--color-text-main)', fontWeight: 500 }}>
+                        <MapPin size={13} color="var(--color-text-muted)" />
+                        {sup.village || '—'}
+                      </span>
+                    </td>
+                    <td>
+                      {sup.mobile ? (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }} className="font-mono-num">
+                          <Phone size={13} color="var(--color-text-muted)" />
+                          {sup.mobile}
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td>
+                      <StatusBadge status={sup.status} />
+                    </td>
+                    <td style={{ fontSize: '0.775rem', color: 'var(--color-text-muted)' }}>
+                      {sup.joiningDate ? new Date(sup.joiningDate).toLocaleDateString('en-IN') : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.35rem' }}>
+                        <button
+                          onClick={() => handleOpenProfile(sup)}
+                          className="btn-icon-sm btn-secondary"
+                          title="View 360° Profile & Ledger"
+                        >
+                          <Eye size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleOpenEdit(sup)}
+                          className="btn-icon-sm btn-ghost"
+                          title="Edit Farmer"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        {(user?.role === 'owner' || user?.role === 'manager') && (
+                          <button
+                            onClick={() => setDeleteId(sup._id)}
+                            className="btn-icon-sm btn-ghost"
+                            style={{ color: 'var(--color-danger)' }}
+                            title="Delete Farmer"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--color-text-muted)' }}>
+                    No farmers found matching the search criteria.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Add / Edit Farmer Modal */}
       <Modal
         isOpen={showModal}
-        onClose={resetForm}
-        title={editingId ? `Edit Supplier Profile (#${formData.supplierCode})` : 'Register New Supplier'}
+        onClose={() => setShowModal(false)}
+        title={editingSupplier ? `Edit Farmer #${formData.supplierCode}` : 'Register New Farmer'}
       >
-        <form onSubmit={handleSubmit}>
-          <div className="grid grid-cols-2" style={{ gap: '0.75rem' }}>
-            <Input
-              label="Supplier Code (Unique Number)*"
-              type="number"
-              inputMode="numeric"
-              name="supplierCode"
-              value={formData.supplierCode}
-              onChange={handleInputChange}
-              required
-              disabled={!!editingId}
-              placeholder="e.g. 101"
-              className={editingId ? '' : 'flex-1'}
-            />
-            <Input
-              label="Farmer Name*"
-              type="text"
-              name="supplierName"
-              value={formData.supplierName}
-              onChange={handleInputChange}
-              required
-              placeholder="Enter full name"
-            />
-            <Input
-              label="Father's Name"
-              type="text"
-              name="fatherName"
-              value={formData.fatherName}
-              onChange={handleInputChange}
-              placeholder="Enter father's name"
-            />
-            <Input
-              label="Mobile Number"
-              type="tel"
-              name="mobile"
-              value={formData.mobile}
-              onChange={handleInputChange}
-              placeholder="10-digit number"
-            />
-            <Input
-              label="Village*"
-              type="text"
-              name="village"
-              value={formData.village}
-              onChange={handleInputChange}
-              required
-              placeholder="Village name"
-            />
-            <Input
-              label="Joining Date"
-              type="date"
-              name="joiningDate"
-              value={formData.joiningDate}
-              onChange={handleInputChange}
-            />
-            <div className="form-group" style={{ gridColumn: 'span 2' }}>
-              <label className="input-md3-label">Status*</label>
-              <select
-                name="status"
-                className="input-md3-control"
-                value={formData.status}
-                onChange={handleInputChange}
+        <form onSubmit={handleSubmitForm}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+            <div className="form-group">
+              <label className="form-label">Farmer Code <span className="required">*</span></label>
+              <input
+                type="number"
+                min="1"
+                className="form-control font-mono-num"
+                value={formData.supplierCode}
+                onChange={(e) => setFormData({ ...formData, supplierCode: Number(e.target.value) })}
                 required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Farmer Name <span className="required">*</span></label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Ramesh Singh"
+                value={formData.supplierName}
+                onChange={(e) => setFormData({ ...formData, supplierName: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Father's Name</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Shyam Lal"
+                value={formData.fatherName}
+                onChange={(e) => setFormData({ ...formData, fatherName: e.target.value })}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Mobile Number</label>
+              <input
+                type="tel"
+                className="form-control"
+                placeholder="10-digit mobile"
+                value={formData.mobile}
+                onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Village / Area <span className="required">*</span></label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Kalyanpur"
+                value={formData.village}
+                onChange={(e) => setFormData({ ...formData, village: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Status</label>
+              <select
+                className="form-control"
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
             </div>
           </div>
-          
-          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
-            <Button variant="outlined" onClick={resetForm}>Cancel</Button>
-            <Button type="submit" variant="primary">{editingId ? 'Save Changes' : 'Register Farmer'}</Button>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--color-border)' }}>
+            <button type="button" onClick={() => setShowModal(false)} className="btn btn-secondary">
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" style={{ minWidth: '120px' }}>
+              {editingSupplier ? 'Save Changes' : 'Register Farmer'}
+            </button>
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={!!deleteId}
+        onCancel={() => setDeleteId(null)}
+        onConfirm={handleDeleteSupplier}
+        title="Delete Farmer Profile"
+        message="Are you sure you want to delete this farmer? If this farmer has previous milk collection or payment history, deletion will be blocked to preserve historical records."
+        confirmText="Yes, Delete Farmer"
+        isDanger={true}
+      />
+
+      {/* 360° Supplier Profile Modal */}
+      {selectedProfile && (
+        <Modal
+          isOpen={!!selectedProfile}
+          onClose={() => setSelectedProfile(null)}
+          title={`Farmer Profile: #${selectedProfile.supplierCode} ${selectedProfile.supplierName}`}
+          size="xl"
+        >
+          {profileLoading ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+              <div className="spinner spinner-gold" style={{ margin: '0 auto 1rem auto' }} />
+              <p>Loading farmer ledger and delivery records...</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Profile KPI Ribbon */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
+                <div style={{ padding: '0.85rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FFF8E7', border: '1px solid #E8D49E' }}>
+                  <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#92400E' }}>Total Milk Supplied</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0F172A', marginTop: '0.2rem' }} className="font-mono-num">
+                    {profileLedger?.summary?.totalMilk || 0} L
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.85rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FAF5FF', border: '1px solid #E9D5FF' }}>
+                  <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#7E22CE' }}>Total Milk Value</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0F172A', marginTop: '0.2rem' }} className="font-mono-num">
+                    ₹{(profileLedger?.summary?.totalAmount || 0).toLocaleString('en-IN')}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.85rem', borderRadius: 'var(--radius-md)', backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                  <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#15803D' }}>Total Paid</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#15803D', marginTop: '0.2rem' }} className="font-mono-num">
+                    ₹{(profileLedger?.summary?.totalPaid || 0).toLocaleString('en-IN')}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.85rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FEF2F2', border: '1px solid #FECACA' }}>
+                  <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#B91C1C' }}>Pending Payable</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#B91C1C', marginTop: '0.2rem' }} className="font-mono-num">
+                    ₹{(profileLedger?.summary?.pendingAmount || 0).toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Ribbon: WhatsApp statement & print */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem' }}>
+                <button
+                  onClick={() => {
+                    const text = generateSupplierWhatsAppText({
+                      supplierName: selectedProfile.supplierName,
+                      supplierCode: selectedProfile.supplierCode,
+                      date: new Date().toISOString().split('T')[0],
+                      totalMilk: profileLedger?.summary?.totalMilk || 0,
+                      totalAmount: profileLedger?.summary?.totalAmount || 0,
+                      totalPaid: profileLedger?.summary?.totalPaid || 0,
+                      pendingAmount: profileLedger?.summary?.pendingAmount || 0,
+                    });
+                    openWhatsApp(selectedProfile.mobile, text);
+                  }}
+                  className="btn btn-success btn-sm"
+                >
+                  <span>Share on WhatsApp</span>
+                </button>
+                <button onClick={() => window.print()} className="btn btn-secondary btn-sm">
+                  <Printer size={14} />
+                  <span>Print Statement</span>
+                </button>
+              </div>
+
+              {/* Detailed Running Ledger Table */}
+              <div className="table-responsive" style={{ maxHeight: '45vh' }}>
+                <table className="dairy-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Description</th>
+                      <th>Purchase (Cr)</th>
+                      <th>Payment (Dr)</th>
+                      <th>Running Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {profileLedger?.history?.length > 0 ? (
+                      profileLedger.history.map((item, idx) => (
+                        <tr key={idx}>
+                          <td style={{ fontSize: '0.8rem' }}>{item.date}</td>
+                          <td>
+                            <span className={`badge ${item.txnType === 'debit' ? 'badge-gold' : 'badge-success'}`}>
+                              {item.type}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: '0.825rem', color: 'var(--color-text-secondary)' }}>
+                            {item.description}
+                          </td>
+                          <td style={{ fontWeight: 700, color: 'var(--color-primary)' }} className="font-mono-num">
+                            {item.txnType === 'debit' ? `₹${item.amount}` : '—'}
+                          </td>
+                          <td style={{ fontWeight: 700, color: 'var(--color-success-text)' }} className="font-mono-num">
+                            {item.txnType === 'credit' ? `₹${item.amount}` : '—'}
+                          </td>
+                          <td style={{ fontWeight: 800, color: item.balance > 0 ? 'var(--color-danger-text)' : 'var(--color-success-text)' }} className="font-mono-num">
+                            ₹{item.balance.toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>
+                          No historical entries found for this farmer.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 };

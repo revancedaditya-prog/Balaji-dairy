@@ -8,18 +8,19 @@ const {
   getVillageWiseReport,
   getMonthlyReport,
   getYearlyReport,
+  getProfitAnalytics,
 } = require('../controllers/reportController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
-router.use(protect); // Guard all routes
+router.use(protect);
 
 router.get('/dashboard-stats', getDashboardStats);
 router.get('/charts', getChartsData);
-
-router.get('/shift-wise', authorize('owner', 'manager'), getShiftWiseReport);
-router.get('/supplier-wise', authorize('owner', 'manager'), getSupplierWiseReport);
-router.get('/village-wise', authorize('owner', 'manager'), getVillageWiseReport);
-router.get('/monthly', authorize('owner', 'manager'), getMonthlyReport);
-router.get('/yearly', authorize('owner', 'manager'), getYearlyReport);
+router.get('/shift-wise', getShiftWiseReport);
+router.get('/supplier-wise', getSupplierWiseReport);
+router.get('/village-wise', getVillageWiseReport);
+router.get('/monthly', getMonthlyReport);
+router.get('/yearly', getYearlyReport);
+router.get('/profit-analytics', authorize('owner'), getProfitAnalytics);
 
 module.exports = router;

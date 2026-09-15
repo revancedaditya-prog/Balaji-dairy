@@ -15,6 +15,13 @@ const UserSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      sparse: true, // Allows null/undefined without violating unique constraint
+      index: true,
+    },
     password: {
       type: String,
       required: [true, 'Please add a password'],
@@ -31,6 +38,8 @@ const UserSchema = new mongoose.Schema(
       enum: ['active', 'inactive'],
       default: 'active',
     },
+    resetPasswordToken: String,
+    resetPasswordExpire: Date,
   },
   {
     timestamps: true,

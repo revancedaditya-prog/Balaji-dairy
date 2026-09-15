@@ -1,578 +1,793 @@
-import React, { useState, useEffect } from 'react';
-import { milkEntryService, supplierService } from '../../services/api';
-import * as XLSX from 'xlsx';
-import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Milk,
+  Plus,
+  Search,
+  Printer,
+  Trash2,
+  Edit2,
+  CheckCircle2,
+  Calendar,
+  Sun,
+  Moon,
+  Users,
+  TrendingUp,
+  AlertCircle
+} from 'lucide-react';
+import { milkEntryService, supplierService, rateChartService } from '../../services/api';
+import { PageHeader, Currency, Quantity, ConfirmationDialog } from '../Common/UIComponents';
+import { useToast } from '../Common/Toast';
+import { useAuth } from '../../context/AuthContext';
 
 const MilkCollection = () => {
+  const { user } = useAuth();
+  const { showSuccess, showError, showWarning } = useToast();
+
+  const [mode, setMode] = useState('quick'); // 'quick' | 'advanced'
+  const [loading, setLoading] = useState(false);
+  const [entries, setEntries] = useState([]);
+  const [todaySummary, setTodaySummary] = useState({ totalMilk: 0, totalAmount: 0, count: 0, avgFat: 0, avgSnf: 0 });
+
+  // Current Shift & Date
+  const getISTDate = () => {
+    const d = new Date();
+    const offset = 5.5 * 60 * 60 * 1000;
+    return new Date(d.getTime() + offset).toISOString().split('T')[0];
+  };
+
+  const getAutoShift = () => {
+    const hour = new Date().getHours();
+    return hour >= 4 && hour < 14 ? 'Morning' : 'Evening';
+  };
+
+  const [filterDate, setFilterDate] = useState(getISTDate());
+  const [filterShift, setFilterShift] = useState(getAutoShift());
+
   // Form State
   const [supplierCode, setSupplierCode] = useState('');
   const [supplierName, setSupplierName] = useState('');
-  const [quantity, setQuantity] = useState('');
+  const [supplierVillage, setSupplierVillage] = useState('');
+  const [milkQuantity, setMilkQuantity] = useState('');
   const [fat, setFat] = useState('');
   const [snf, setSnf] = useState('');
+  const [rate, setRate] = useState('');
   const [amount, setAmount] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [entryDate, setEntryDate] = useState(getISTDate());
+  const [entryShift, setEntryShift] = useState(getAutoShift());
 
-  // Time & Shift Detect
-  const getISTDateTime = () => {
-    const d = new Date();
-    // UTC offset for IST is +5.5 hours
-    const localTime = d.getTime() + (d.getTimezoneOffset() * 60000);
-    const istTime = new Date(localTime + (3600000 * 5.5));
-    
-    const dateStr = istTime.toISOString().split('T')[0];
-    const timeStr = istTime.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
-    return { dateStr, timeStr };
-  };
+  // Delete Dialog
+  const [deleteId, setDeleteId] = useState(null);
 
-  const detectShift = (timeString) => {
-    const hour = parseInt(timeString.split(':')[0], 10);
-    // Morning shift is typically before 2 PM (14:00)
-    return hour < 14 ? 'Morning' : 'Evening';
-  };
+  // Print Slip
+  const [printSlipData, setPrintSlipData] = useState(null);
 
-  const initDateTime = getISTDateTime();
-  const [entryDate, setEntryDate] = useState(initDateTime.dateStr);
-  const [entryTime, setEntryTime] = useState(initDateTime.timeStr);
-  const [shift, setShift] = useState(detectShift(initDateTime.timeStr));
-  const [customDateTime, setCustomDateTime] = useState(false);
+  // Input Refs for keyboard navigation
+  const codeInputRef = useRef(null);
+  const qtyInputRef = useRef(null);
+  const fatInputRef = useRef(null);
+  const snfInputRef = useRef(null);
 
-  // Filters State
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterShift, setFilterShift] = useState('');
-  const [filterCode, setFilterCode] = useState('');
-  const [filterName, setFilterName] = useState('');
-  const [filterVillage, setFilterVillage] = useState('');
-
-  // Data Listing State
-  const [entries, setEntries] = useState([]);
-  const [loadingList, setLoadingList] = useState(true);
-  const [formError, setFormError] = useState('');
-  const [formSuccess, setFormSuccess] = useState('');
-
-  // Live calculated fields
-  const calculatedRate = (quantity && amount) 
-    ? (parseFloat(amount) / parseFloat(quantity)).toFixed(2) 
-    : '0.00';
-
-  // Live Look up on code entry
-  const handleCodeBlur = async () => {
-    if (!supplierCode) return;
-    setFormError('');
+  // Fetch entries for the selected date & shift
+  const fetchEntries = useCallback(async () => {
     try {
-      const res = await supplierService.getSuppliers({ search: supplierCode });
-      if (res.success && res.data.length > 0) {
-        // Exact match check
-        const match = res.data.find(s => s.supplierCode === parseInt(supplierCode, 10));
-        if (match) {
-          if (match.status !== 'active') {
-            setFormError(`Supplier #${supplierCode} is INACTIVE`);
-            setSupplierName('');
-          } else {
-            setSupplierName(match.supplierName);
-          }
-        } else {
-          setSupplierName('');
-          setFormError(`Supplier Code #${supplierCode} not registered`);
-        }
-      } else {
-        setSupplierName('');
-        setFormError(`Supplier Code #${supplierCode} not registered`);
-      }
-    } catch (err) {
-      console.error('Supplier lookup error:', err);
-    }
-  };
-
-  // Sync date/time if not custom
-  useEffect(() => {
-    if (!customDateTime) {
-      const timer = setInterval(() => {
-        const ist = getISTDateTime();
-        setEntryDate(ist.dateStr);
-        setEntryTime(ist.timeStr);
-        setShift(detectShift(ist.timeStr));
-      }, 30000); // Check every 30s
-      return () => clearInterval(timer);
-    }
-  }, [customDateTime]);
-
-  const loadEntries = async () => {
-    try {
-      setLoadingList(true);
-      const filters = {
-        startDate,
-        endDate,
+      setLoading(true);
+      const res = await milkEntryService.getEntries({
+        date: filterDate,
         shift: filterShift,
-        supplierCode: filterCode,
-        supplierName: filterName,
-        village: filterVillage
-      };
-      const res = await milkEntryService.getEntries(filters);
+      });
       if (res.success) {
         setEntries(res.data);
+
+        // Compute summary
+        const totalMilk = Math.round(res.data.reduce((sum, e) => sum + e.milkQuantity, 0) * 100) / 100;
+        const totalAmount = Math.round(res.data.reduce((sum, e) => sum + e.amount, 0) * 100) / 100;
+        const fatSum = res.data.reduce((sum, e) => sum + e.fat * e.milkQuantity, 0);
+        const snfSum = res.data.reduce((sum, e) => sum + e.snf * e.milkQuantity, 0);
+        const avgFat = totalMilk > 0 ? Math.round((fatSum / totalMilk) * 100) / 100 : 0;
+        const avgSnf = totalMilk > 0 ? Math.round((snfSum / totalMilk) * 100) / 100 : 0;
+
+        setTodaySummary({
+          totalMilk,
+          totalAmount,
+          count: res.data.length,
+          avgFat,
+          avgSnf,
+        });
       }
     } catch (err) {
-      console.error('Failed to load milk entries:', err);
+      console.error(err);
+      showError('Failed to fetch milk collection records');
     } finally {
-      setLoadingList(false);
+      setLoading(false);
     }
-  };
+  }, [filterDate, filterShift, showError]);
 
   useEffect(() => {
-    loadEntries();
-  }, [startDate, endDate, filterCode, filterName, filterShift, filterVillage]);
+    fetchEntries();
+  }, [fetchEntries]);
 
-  // Submit milk collection entry
-  const handleSubmitEntry = async (e) => {
-    e.preventDefault();
-    setFormError('');
-    setFormSuccess('');
+  // Lookup Supplier details when code changes
+  useEffect(() => {
+    const codeNum = parseInt(supplierCode, 10);
+    if (!codeNum || isNaN(codeNum)) {
+      setSupplierName('');
+      setSupplierVillage('');
+      return;
+    }
 
-    if (!supplierCode || !supplierName || !quantity || !amount) {
-      setFormError('Please enter Supplier Code, Quantity and Amount');
+    const timer = setTimeout(async () => {
+      try {
+        const res = await supplierService.getSupplierByCode(codeNum);
+        if (res.success && res.data) {
+          setSupplierName(res.data.supplierName);
+          setSupplierVillage(res.data.village || '');
+        } else {
+          setSupplierName('');
+          setSupplierVillage('');
+        }
+      } catch {
+        setSupplierName('');
+        setSupplierVillage('');
+      }
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [supplierCode]);
+
+  // Lookup Rate when Fat & SNF change
+  useEffect(() => {
+    const fatNum = parseFloat(fat);
+    const snfNum = parseFloat(snf);
+
+    if (fatNum > 0 && snfNum > 0) {
+      const timer = setTimeout(async () => {
+        try {
+          const res = await rateChartService.lookupRate(fatNum, snfNum);
+          if (res.success && res.rate > 0) {
+            setRate(res.rate);
+            const qtyNum = parseFloat(milkQuantity);
+            if (qtyNum > 0) {
+              setAmount(Math.round(qtyNum * res.rate * 100) / 100);
+            }
+          } else {
+            // Fallback formula if not in grid: rate = fat * 7.2 + snf * 3.5
+            const calculatedRate = Math.round((fatNum * 7.2 + snfNum * 3.5) * 10) / 10;
+            setRate(calculatedRate);
+            const qtyNum = parseFloat(milkQuantity);
+            if (qtyNum > 0) {
+              setAmount(Math.round(qtyNum * calculatedRate * 100) / 100);
+            }
+          }
+        } catch {
+          const calculatedRate = Math.round((fatNum * 7.2 + snfNum * 3.5) * 10) / 10;
+          setRate(calculatedRate);
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [fat, snf, milkQuantity]);
+
+  // Recalculate amount when quantity or rate changes
+  useEffect(() => {
+    const q = parseFloat(milkQuantity);
+    const r = parseFloat(rate);
+    if (q > 0 && r > 0) {
+      setAmount(Math.round(q * r * 100) / 100);
+    }
+  }, [milkQuantity, rate]);
+
+  const handleSaveEntry = async (e) => {
+    if (e) e.preventDefault();
+
+    const codeNum = parseInt(supplierCode, 10);
+    const qtyNum = parseFloat(milkQuantity);
+    const fatNum = parseFloat(fat) || 0;
+    const snfNum = parseFloat(snf) || 0;
+    const rateNum = parseFloat(rate) || 0;
+    const amountNum = parseFloat(amount) || Math.round(qtyNum * rateNum * 100) / 100;
+
+    if (!codeNum) {
+      showWarning('Please enter a valid Supplier Code');
+      codeInputRef.current?.focus();
+      return;
+    }
+    if (!qtyNum || qtyNum <= 0) {
+      showWarning('Please enter a valid milk quantity in liters');
+      qtyInputRef.current?.focus();
+      return;
+    }
+    if (amountNum <= 0) {
+      showWarning('Amount must be greater than zero. Check rate or quantity.');
       return;
     }
 
     try {
-      const res = await milkEntryService.addEntry({
-        supplierCode: parseInt(supplierCode, 10),
-        milkQuantity: parseFloat(quantity),
-        fat: fat ? parseFloat(fat) : 0,
-        snf: snf ? parseFloat(snf) : 0,
-        date: entryDate,
-        time: entryTime,
-        shift,
-        amount: parseFloat(amount),
-        remarks,
-      });
+      const payload = {
+        supplierCode: codeNum,
+        supplierName: supplierName || `Farmer #${codeNum}`,
+        date: mode === 'quick' ? filterDate : entryDate,
+        shift: mode === 'quick' ? filterShift : entryShift,
+        milkQuantity: qtyNum,
+        fat: fatNum,
+        snf: snfNum,
+        rate: rateNum,
+        amount: amountNum,
+        remarks: remarks || '',
+      };
 
+      const res = await milkEntryService.addEntry(payload);
       if (res.success) {
-        setFormSuccess(`Entry logged for #${supplierCode} - Qty: ${quantity}L, Amt: ₹${amount}`);
-        // Reset form except Code to facilitate quick consecutive entries for next supplier
-        setQuantity('');
+        showSuccess(`Saved: #${codeNum} ${supplierName || ''} — ${qtyNum}L (₹${amountNum})`);
+
+        // Set print slip data
+        setPrintSlipData({
+          ...res.data,
+          village: supplierVillage,
+        });
+
+        // Reset form for next entry & auto-focus code input
+        setSupplierCode('');
+        setSupplierName('');
+        setSupplierVillage('');
+        setMilkQuantity('');
         setFat('');
         setSnf('');
+        setRate('');
         setAmount('');
         setRemarks('');
-        loadEntries();
+
+        fetchEntries();
+        codeInputRef.current?.focus();
       }
     } catch (err) {
-      setFormError(err.response?.data?.message || 'Error occurred while saving entry');
       console.error(err);
+      showError(err.response?.data?.message || 'Failed to save milk entry');
     }
   };
 
-  const handleDeleteEntry = async (id, code) => {
-    if (!window.confirm('Delete this milk collection entry record?')) {
-      return;
-    }
+  const handleDelete = async () => {
+    if (!deleteId) return;
     try {
-      const res = await milkEntryService.deleteEntry(id);
+      const res = await milkEntryService.deleteEntry(deleteId);
       if (res.success) {
-        loadEntries();
+        showSuccess('Milk entry deleted successfully');
+        setDeleteId(null);
+        fetchEntries();
       }
     } catch (err) {
-      console.error(err);
+      showError(err.response?.data?.message || 'Failed to delete milk entry');
     }
-  };
-
-  // Excel Export
-  const exportToExcel = () => {
-    const formattedData = entries.map((e) => ({
-      'Supplier Code': e.supplierCode,
-      'Supplier Name': e.supplierName,
-      'Date': e.date,
-      'Time': e.time,
-      'Shift': e.shift,
-      'Milk Liters': e.milkQuantity,
-      'Fat %': e.fat,
-      'SNF %': e.snf,
-      'Amount (Rs)': e.amount,
-      'Remarks': e.remarks || '-'
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(formattedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Milk_Entries');
-    XLSX.writeFile(workbook, `Milk_Collection_${startDate}_to_${endDate}.xlsx`);
-  };
-
-  // PDF Export
-  const exportToPDF = () => {
-    const totalQty = entries.reduce((sum, e) => sum + e.milkQuantity, 0);
-    const totalAmt = entries.reduce((sum, e) => sum + e.amount, 0);
-
-    const printContent = `
-      <html>
-        <head>
-          <title>Milk Collection - Balaji Dairy</title>
-          <style>
-            body { font-family: sans-serif; padding: 20px; color: #333; }
-            h2 { text-align: center; color: #1e40af; margin-bottom: 5px; }
-            h4 { text-align: center; font-weight: normal; margin-top: 0; color: #666; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 11px; }
-            th { background-color: #f3f4f6; color: #4b5563; font-weight: bold; border: 1px solid #d1d5db; padding: 6px; text-align: left; }
-            td { border: 1px solid #e5e7eb; padding: 6px; }
-            tr:nth-child(even) { background-color: #f9fafb; }
-            .total-row { font-weight: bold; background-color: #e5e7eb !important; }
-          </style>
-        </head>
-        <body>
-          <h2>BALAJI DAIRY COLLECTION CENTER</h2>
-          <h4>COLLECTION STATEMENT (${startDate} to ${endDate})</h4>
-          <table>
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Supplier Name</th>
-                <th>Date</th>
-                <th>Shift</th>
-                <th>Qty (L)</th>
-                <th>FAT (%)</th>
-                <th>SNF (%)</th>
-                <th>Amount (₹)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${entries.map(e => `
-                <tr>
-                  <td><b>#${e.supplierCode}</b></td>
-                  <td>${e.supplierName}</td>
-                  <td>${e.date}</td>
-                  <td>${e.shift}</td>
-                  <td>${e.milkQuantity} L</td>
-                  <td>${e.fat}%</td>
-                  <td>${e.snf}%</td>
-                  <td>₹${e.amount}</td>
-                </tr>
-              `).join('')}
-              <tr class="total-row">
-                <td colspan="4">TOTAL SUMMARY</td>
-                <td>${Math.round(totalQty * 100) / 100} L</td>
-                <td colspan="2">-</td>
-                <td>₹${Math.round(totalAmt * 100) / 100}</td>
-              </tr>
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `;
-
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
   };
 
   return (
-    <div className="collection-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
-      <div className="grid grid-cols-3" style={{ gap: '1rem', alignItems: 'start' }}>
-        {/* Entry Screen (Handheld style) */}
-        <div style={{ gridColumn: 'span 1' }}>
-          <Card style={{ padding: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: '600', marginBottom: '1rem', borderBottom: '1px solid var(--md-sys-color-surface-variant)', paddingBottom: '0.5rem' }}>
-              Collection Desk
-            </h3>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Header with Shift Selector */}
+      <PageHeader
+        title="Milk Collection"
+        hindiTitle="दूध खरीद व संकलन"
+        subtitle="Fast dairy milk entry with automatic rate calculation, Fat × SNF lookup, and instant print slips."
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', backgroundColor: 'var(--color-surface)', padding: '0.25rem 0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+              <Calendar size={16} color="var(--color-text-muted)" />
+              <input
+                type="date"
+                value={filterDate}
+                onChange={(e) => setFilterDate(e.target.value)}
+                style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-main)' }}
+              />
+            </div>
 
-            {formError && <div className="error-alert" style={{ marginBottom: '1rem' }}>{formError}</div>}
-            {formSuccess && <div className="success-alert" style={{ marginBottom: '1rem' }}>{formSuccess}</div>}
-
-            <form onSubmit={handleSubmitEntry}>
-              <Input
-                label="Supplier Code (Press Tab / Blur to look up)*"
-                type="number"
-                inputMode="numeric"
-                placeholder="Farmer numeric code"
-                value={supplierCode}
-                onChange={(e) => {
-                  setSupplierCode(e.target.value);
-                  setSupplierName('');
+            <div style={{ display: 'flex', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setFilterShift('Morning')}
+                style={{
+                  padding: '0.45rem 0.85rem',
+                  border: 'none',
+                  backgroundColor: filterShift === 'Morning' ? '#FEF3C7' : 'var(--color-surface)',
+                  color: filterShift === 'Morning' ? '#92400E' : 'var(--color-text-muted)',
+                  fontWeight: 700,
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  cursor: 'pointer',
                 }}
-                onBlur={handleCodeBlur}
-                required
-              />
+              >
+                <Sun size={14} /> Morning
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterShift('Evening')}
+                style={{
+                  padding: '0.45rem 0.85rem',
+                  border: 'none',
+                  backgroundColor: filterShift === 'Evening' ? '#EDE9FE' : 'var(--color-surface)',
+                  color: filterShift === 'Evening' ? '#5B21B6' : 'var(--color-text-muted)',
+                  fontWeight: 700,
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  cursor: 'pointer',
+                }}
+              >
+                <Moon size={14} /> Evening
+              </button>
+            </div>
+          </div>
+        }
+      />
 
-              <Input
-                label="Supplier Name"
-                type="text"
-                value={supplierName}
-                readOnly
-                placeholder="Farmer name auto-fills"
-                style={{ opacity: 0.85 }}
-              />
-
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <Input
-                  label="Date"
-                  type="date"
-                  value={entryDate}
-                  onChange={(e) => {
-                    setEntryDate(e.target.value);
-                    setCustomDateTime(true);
-                  }}
-                  className="flex-1"
-                />
-                <Input
-                  label="Time"
-                  type="time"
-                  value={entryTime}
-                  onChange={(e) => {
-                    setEntryTime(e.target.value);
-                    setCustomDateTime(true);
-                  }}
-                  className="flex-1"
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-                <div style={{ flex: 1 }}>
-                  <label className="input-md3-label">Shift</label>
-                  <select 
-                    className="input-md3-control" 
-                    value={shift} 
-                    onChange={(e) => {
-                      setShift(e.target.value);
-                      setCustomDateTime(true);
-                    }}
-                  >
-                    <option value="Morning">Morning</option>
-                    <option value="Evening">Evening</option>
-                  </select>
-                </div>
-                {customDateTime && (
-                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                    <Button variant="outlined" onClick={() => setCustomDateTime(false)} style={{ height: '48px', fontSize: '0.75rem', padding: '0 0.5rem' }}>
-                      Auto Live
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <Input
-                  label="Quantity (Liters)*"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  placeholder="e.g. 10.5"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  required
-                  className="flex-1"
-                />
-                <Input
-                  label="Total Amount (₹)*"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  placeholder="e.g. 500"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                  className="flex-1"
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <Input
-                  label="FAT (%)"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  placeholder="e.g. 4.5"
-                  value={fat}
-                  onChange={(e) => setFat(e.target.value)}
-                  className="flex-1"
-                />
-                <Input
-                  label="SNF (%)"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  placeholder="e.g. 8.5"
-                  value={snf}
-                  onChange={(e) => setSnf(e.target.value)}
-                  className="flex-1"
-                />
-              </div>
-
-              {/* Dynamic Rates Display */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '0.75rem 1rem',
-                backgroundColor: 'var(--md-sys-color-primary-container)',
-                color: 'var(--md-sys-color-on-primary-container)',
-                borderRadius: 'var(--md-shape-corner-medium)',
-                fontSize: '0.9rem',
-                fontWeight: '600',
-                marginBottom: '1.25rem'
-              }}>
-                <span>Calculated Rate:</span>
-                <span>₹ {calculatedRate} / Liter</span>
-              </div>
-
-              <Input
-                label="Remarks"
-                type="text"
-                placeholder="Optional notes..."
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-              />
-
-              <Button type="submit" variant="primary" style={{ width: '100%' }}>
-                Save Milk Entry
-              </Button>
-            </form>
-          </Card>
+      {/* Shift Live Statistics Banner */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
+        <div className="card" style={{ padding: '0.85rem 1.15rem', background: '#FFF8E7', borderColor: '#E8D49E' }}>
+          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#92400E', textTransform: 'uppercase' }}>Shift Collection</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.2rem' }} className="font-mono-num">
+            {todaySummary.totalMilk} L
+          </div>
+          <div style={{ fontSize: '0.725rem', color: '#B45309' }}>{todaySummary.count} Entries Recorded</div>
         </div>
 
-        {/* Logs Listing */}
-        <div style={{ gridColumn: 'span 2' }}>
-          <Card style={{ padding: '1rem', marginBottom: '1rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.75rem' }}>Filters & Query</h3>
-            
-            <div className="grid grid-cols-3" style={{ gap: '0.75rem' }}>
-              <Input label="Start Date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-              <Input label="End Date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-              <div>
-                <label className="input-md3-label">Shift</label>
-                <select className="input-md3-control" value={filterShift} onChange={(e) => setFilterShift(e.target.value)}>
-                  <option value="">All Shifts</option>
+        <div className="card" style={{ padding: '0.85rem 1.15rem', background: '#F0FDF4', borderColor: '#BBF7D0' }}>
+          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#15803D', textTransform: 'uppercase' }}>Total Amount</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.2rem' }} className="font-mono-num">
+            ₹{todaySummary.totalAmount.toLocaleString('en-IN')}
+          </div>
+          <div style={{ fontSize: '0.725rem', color: '#16A34A' }}>Shift Purchase Cost</div>
+        </div>
+
+        <div className="card" style={{ padding: '0.85rem 1.15rem', background: '#FAF5FF', borderColor: '#E9D5FF' }}>
+          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#7E22CE', textTransform: 'uppercase' }}>Weighted Avg Fat</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.2rem' }} className="font-mono-num">
+            {todaySummary.avgFat} %
+          </div>
+          <div style={{ fontSize: '0.725rem', color: '#9333EA' }}>Quality Index</div>
+        </div>
+
+        <div className="card" style={{ padding: '0.85rem 1.15rem', background: '#F0F9FF', borderColor: '#BAE6FD' }}>
+          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#0369A1', textTransform: 'uppercase' }}>Weighted Avg SNF</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.2rem' }} className="font-mono-num">
+            {todaySummary.avgSnf} %
+          </div>
+          <div style={{ fontSize: '0.725rem', color: '#0284C7' }}>Solids-not-Fat</div>
+        </div>
+      </div>
+
+      {/* Milk Entry Form Card */}
+      <div className="card" style={{ border: '2px solid var(--color-accent-border)', backgroundColor: '#FFFFFF' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--color-border)', paddingBottom: '0.85rem', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: 'var(--radius-md)', background: 'linear-gradient(135deg, #E6CA65 0%, #D4AF37 100%)', color: '#0F172A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Milk size={20} strokeWidth={2.5} />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-primary)' }}>
+                {mode === 'quick' ? 'FAST MILK COLLECTION ENTRY' : 'ADVANCED MILK ENTRY'}
+              </h3>
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 500 }}>
+                {filterDate} • {filterShift} Shift Entry
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              type="button"
+              onClick={() => setMode(mode === 'quick' ? 'advanced' : 'quick')}
+              className="btn btn-secondary btn-sm"
+            >
+              {mode === 'quick' ? 'Switch to Advanced Entry' : 'Switch to Fast Quick Entry'}
+            </button>
+          </div>
+        </div>
+
+        {/* Quick / Advanced Entry Form */}
+        <form onSubmit={handleSaveEntry}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '1rem', alignItems: 'flex-start' }}>
+            {/* Supplier Code */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">
+                <span>Farmer Code</span>
+                <span className="required">*</span>
+              </label>
+              <input
+                ref={codeInputRef}
+                type="number"
+                min="1"
+                className="form-control font-mono-num"
+                style={{ fontSize: '1.1rem', fontWeight: 700, borderColor: supplierName ? 'var(--color-success)' : 'var(--color-border)' }}
+                placeholder="Code (e.g. 101)"
+                value={supplierCode}
+                onChange={(e) => setSupplierCode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    qtyInputRef.current?.focus();
+                  }
+                }}
+                autoFocus
+                required
+              />
+              {supplierName && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--color-success-text)', fontWeight: 700, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                  <CheckCircle2 size={12} /> {supplierName} {supplierVillage ? `(${supplierVillage})` : ''}
+                </span>
+              )}
+            </div>
+
+            {/* Quantity */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">
+                <span>Quantity (L)</span>
+                <span className="required">*</span>
+              </label>
+              <input
+                ref={qtyInputRef}
+                type="number"
+                step="0.1"
+                min="0.1"
+                className="form-control font-mono-num"
+                style={{ fontSize: '1.1rem', fontWeight: 700 }}
+                placeholder="Liters"
+                value={milkQuantity}
+                onChange={(e) => setMilkQuantity(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    fatInputRef.current?.focus();
+                  }
+                }}
+                required
+              />
+            </div>
+
+            {/* Fat */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">
+                <span>Fat %</span>
+              </label>
+              <input
+                ref={fatInputRef}
+                type="number"
+                step="0.1"
+                min="1"
+                max="15"
+                className="form-control font-mono-num"
+                style={{ fontSize: '1.1rem', fontWeight: 700 }}
+                placeholder="e.g. 6.5"
+                value={fat}
+                onChange={(e) => setFat(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    snfInputRef.current?.focus();
+                  }
+                }}
+              />
+            </div>
+
+            {/* SNF */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">
+                <span>SNF %</span>
+              </label>
+              <input
+                ref={snfInputRef}
+                type="number"
+                step="0.1"
+                min="1"
+                max="15"
+                className="form-control font-mono-num"
+                style={{ fontSize: '1.1rem', fontWeight: 700 }}
+                placeholder="e.g. 9.0"
+                value={snf}
+                onChange={(e) => setSnf(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveEntry();
+                  }
+                }}
+              />
+            </div>
+
+            {/* Auto Rate */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">
+                <span>Rate (₹/L)</span>
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                className="form-control font-mono-num"
+                style={{ fontSize: '1.1rem', fontWeight: 700, backgroundColor: 'var(--color-surface-secondary)' }}
+                placeholder="₹/L"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+              />
+            </div>
+
+            {/* Auto Amount */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">
+                <span>Total Amount</span>
+              </label>
+              <div
+                className="font-mono-num"
+                style={{
+                  minHeight: '42px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0.55rem 0.85rem',
+                  fontSize: '1.2rem',
+                  fontWeight: 800,
+                  color: 'var(--color-success-text)',
+                  backgroundColor: 'var(--color-success-bg)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1.5px solid var(--color-success-border)',
+                }}
+              >
+                ₹{amount || 0}
+              </div>
+            </div>
+          </div>
+
+          {/* Advanced fields when in advanced mode */}
+          {mode === 'advanced' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px dashed var(--color-border)' }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Date Override</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={entryDate}
+                  onChange={(e) => setEntryDate(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Shift Override</label>
+                <select
+                  className="form-control"
+                  value={entryShift}
+                  onChange={(e) => setEntryShift(e.target.value)}
+                >
                   <option value="Morning">Morning</option>
                   <option value="Evening">Evening</option>
                 </select>
               </div>
-              <Input label="Farmer Code" type="number" placeholder="Code" value={filterCode} onChange={(e) => setFilterCode(e.target.value)} />
-              <Input label="Farmer Name" type="text" placeholder="Search name" value={filterName} onChange={(e) => setFilterName(e.target.value)} />
-              <Input label="Village" type="text" placeholder="Search village" value={filterVillage} onChange={(e) => setFilterVillage(e.target.value)} />
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Remarks / Notes</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. sample test passed"
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                />
+              </div>
             </div>
+          )}
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
-              <Button variant="outlined" onClick={exportToExcel} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Export Excel</Button>
-              <Button variant="outlined" onClick={exportToPDF} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Print PDF</Button>
-            </div>
-          </Card>
+          {/* Action Button Row */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--color-border)' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setSupplierCode('');
+                setSupplierName('');
+                setMilkQuantity('');
+                setFat('');
+                setSnf('');
+                setRate('');
+                setAmount('');
+                codeInputRef.current?.focus();
+              }}
+              className="btn btn-secondary"
+            >
+              Clear Form
+            </button>
+            <button
+              type="submit"
+              className="btn btn-accent btn-lg"
+              style={{ fontWeight: 800, minWidth: '180px' }}
+            >
+              <Plus size={18} strokeWidth={3} />
+              <span>Save & Next Supplier</span>
+            </button>
+          </div>
+        </form>
+      </div>
 
-          <Card style={{ padding: '1rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem' }}>Milk Collection Log</h3>
+      {/* Shift Collections Table */}
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-primary)' }}>
+              {filterDate} ({filterShift} Shift) Collection Records
+            </h3>
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+              Showing {entries.length} entries for this shift
+            </span>
+          </div>
+        </div>
 
-            <div className="table-container desktop-only">
-              {loadingList ? (
-                <Loading label="Filtering entries..." />
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Farmer</th>
-                      <th>Date / Time</th>
-                      <th>Shift</th>
-                      <th>Qty</th>
-                      <th>FAT/SNF</th>
-                      <th>Amount</th>
-                      <th style={{ textAlign: 'right' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entries.length > 0 ? (
-                      entries.map((e) => (
-                        <tr key={e._id}>
-                          <td>
-                            <b>#{e.supplierCode}</b>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-                              {e.supplierName}
-                            </div>
-                          </td>
-                          <td>
-                            {e.date}
-                            <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-                              {e.time}
-                            </div>
-                          </td>
-                          <td>
-                            <Badge type={e.shift === 'Morning' ? 'primary' : 'success'}>
-                              {e.shift}
-                            </Badge>
-                          </td>
-                          <td>{e.milkQuantity} L</td>
-                          <td>{e.fat}% / {e.snf}%</td>
-                          <td style={{ fontWeight: '600' }}>₹{e.amount}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <Button
-                              variant="danger"
-                              style={{ padding: '0.2rem 0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
-                              onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
-                            >
-                              Delete
-                            </Button>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
-                          No milk collection records match the filter query.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Mobile View Card List */}
-            <div className="mobile-card-list mobile-only">
-              {loadingList ? (
-                <Loading label="Filtering entries..." />
-              ) : entries.length > 0 ? (
-                entries.map((e) => (
-                  <div key={e._id} className="mobile-row-card">
-                    <div className="mobile-row-card-header">
-                      <div className="mobile-row-card-title">#{e.supplierCode} - {e.supplierName}</div>
-                      <Badge type={e.shift === 'Morning' ? 'primary' : 'success'}>
-                        {e.shift}
-                      </Badge>
-                    </div>
-                    <div className="mobile-row-card-body">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                        <span>Liters Collected:</span>
-                        <span style={{ fontWeight: '600' }}>{e.milkQuantity} L</span>
+        <div className="table-responsive">
+          <table className="dairy-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Farmer Name</th>
+                <th>Quantity</th>
+                <th>Fat %</th>
+                <th>SNF %</th>
+                <th>Rate (₹/L)</th>
+                <th>Amount (₹)</th>
+                <th>Time</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.length > 0 ? (
+                entries.map((entry) => (
+                  <tr key={entry._id}>
+                    <td>
+                      <span className="badge badge-gold font-mono-num">#{entry.supplierCode}</span>
+                    </td>
+                    <td style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                      {entry.supplierName}
+                    </td>
+                    <td style={{ fontWeight: 800, fontSize: '0.95rem' }} className="font-mono-num">
+                      {entry.milkQuantity} L
+                    </td>
+                    <td className="font-mono-num">{entry.fat > 0 ? `${entry.fat}%` : '-'}</td>
+                    <td className="font-mono-num">{entry.snf > 0 ? `${entry.snf}%` : '-'}</td>
+                    <td className="font-mono-num">₹{entry.rate}</td>
+                    <td style={{ fontWeight: 800, color: 'var(--color-success-text)' }} className="font-mono-num">
+                      ₹{entry.amount.toLocaleString('en-IN')}
+                    </td>
+                    <td style={{ fontSize: '0.775rem', color: 'var(--color-text-muted)' }}>
+                      {entry.time || '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.35rem' }}>
+                        <button
+                          onClick={() => setPrintSlipData(entry)}
+                          className="btn-icon-sm btn-secondary"
+                          title="Print Milk Slip"
+                        >
+                          <Printer size={14} />
+                        </button>
+                        {(user?.role === 'owner' || user?.role === 'manager') && (
+                          <button
+                            onClick={() => setDeleteId(entry._id)}
+                            className="btn-icon-sm btn-ghost"
+                            style={{ color: 'var(--color-danger)' }}
+                            title="Delete Entry"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                        <span>FAT / SNF:</span>
-                        <span>{e.fat}% / {e.snf}%</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                        <span>Date / Time:</span>
-                        <span>{e.date} • {e.time}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', borderTop: '1px dashed var(--md-sys-color-surface-variant)', paddingTop: '0.25rem' }}>
-                        <span style={{ fontWeight: '600' }}>Total Amount:</span>
-                        <span style={{ fontWeight: '700', color: 'var(--md-sys-color-primary)', fontSize: '0.95rem' }}>₹{e.amount}</span>
-                      </div>
-                    </div>
-                    <div className="mobile-row-card-actions">
-                      <Button
-                        variant="danger"
-                        style={{ padding: '0.2rem 0.5rem', minHeight: '36px', fontSize: '0.8rem' }}
-                        onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
-                      >
-                        Delete Entry
-                      </Button>
-                    </div>
-                  </div>
+                    </td>
+                  </tr>
                 ))
               ) : (
-                <EmptyState message="No milk collection records match the filter query" />
+                <tr>
+                  <td colSpan="9" style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--color-text-muted)' }}>
+                    No milk entries recorded for {filterDate} ({filterShift} Shift). Enter supplier code above to begin.
+                  </td>
+                </tr>
               )}
-            </div>
-          </Card>
+            </tbody>
+          </table>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={!!deleteId}
+        onCancel={() => setDeleteId(null)}
+        onConfirm={handleDelete}
+        title="Delete Milk Collection Record"
+        message="Are you sure you want to delete this milk collection entry? This will reverse the purchase amount from the supplier's balance."
+        confirmText="Yes, Delete Record"
+        isDanger={true}
+      />
+
+      {/* Printable Milk Slip Modal */}
+      {printSlipData && (
+        <div className="modal-overlay" onClick={() => setPrintSlipData(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '420px' }}>
+            <div className="modal-header">
+              <h3>Farmer Milk Slip</h3>
+              <button onClick={() => setPrintSlipData(null)} className="btn-icon-sm btn-ghost">✕</button>
+            </div>
+
+            <div className="modal-body">
+              <div
+                id="printable-slip"
+                style={{
+                  border: '1.5px dashed #0F172A',
+                  padding: '1.25rem',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: '#FFFFFF',
+                  fontFamily: 'monospace',
+                }}
+              >
+                <div style={{ textAlign: 'center', borderBottom: '1px solid #000', paddingBottom: '0.5rem', marginBottom: '0.75rem' }}>
+                  <h2 style={{ fontSize: '1.2rem', fontWeight: 900, margin: 0 }}>BALAJI DAIRY</h2>
+                  <p style={{ fontSize: '0.75rem', margin: '2px 0 0 0' }}>Fresh Milk Collection Center</p>
+                </div>
+
+                <div style={{ fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Farmer Code:</span>
+                    <strong>#{printSlipData.supplierCode}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Farmer Name:</span>
+                    <strong>{printSlipData.supplierName}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Date & Shift:</span>
+                    <span>{printSlipData.date} ({printSlipData.shift})</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Time:</span>
+                    <span>{printSlipData.time || new Date().toLocaleTimeString()}</span>
+                  </div>
+                  <hr style={{ border: 'none', borderTop: '1px dashed #999', margin: '0.35rem 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.05rem', fontWeight: 800 }}>
+                    <span>Quantity:</span>
+                    <span>{printSlipData.milkQuantity} L</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Fat:</span>
+                    <span>{printSlipData.fat}%</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>SNF:</span>
+                    <span>{printSlipData.snf}%</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Rate:</span>
+                    <span>₹{printSlipData.rate}/L</span>
+                  </div>
+                  <hr style={{ border: 'none', borderTop: '1px solid #000', margin: '0.5rem 0' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: 900 }}>
+                    <span>Total Amount:</span>
+                    <span>₹{printSlipData.amount}</span>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'center', marginTop: '1rem', paddingTop: '0.5rem', borderTop: '1px dashed #999', fontSize: '0.7rem' }}>
+                  Thank you! • Balaji Dairy ERP
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button onClick={() => setPrintSlipData(null)} className="btn btn-secondary btn-sm">
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  window.print();
+                }}
+                className="btn btn-primary btn-sm"
+              >
+                <Printer size={16} />
+                <span>Print Slip</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

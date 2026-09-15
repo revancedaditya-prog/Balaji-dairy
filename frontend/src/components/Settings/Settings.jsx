@@ -1,45 +1,116 @@
 import React, { useState, useEffect } from 'react';
-import { authService, backupService, auditService } from '../../services/api';
+import {
+  Building2,
+  Clock,
+  ShieldCheck,
+  Download,
+  Upload,
+  Save,
+  KeyRound,
+  FileSpreadsheet,
+  AlertTriangle,
+  FileText,
+  Phone,
+  Mail,
+  MapPin,
+  IndianRupee,
+  RefreshCw
+} from 'lucide-react';
+import { settingService, authService, backupService } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
+import { useToast } from '../Common/Toast';
+import { PageHeader, Modal, ConfirmationDialog } from '../Common/UIComponents';
 
-const Settings = ({ setActiveTab }) => {
-  const { user, logout } = useAuth();
+const Settings = () => {
+  const { user } = useAuth();
+  const { showSuccess, showError, showWarning } = useToast();
+
+  const [activeTab, setActiveTab] = useState('profile');
+  const [loading, setLoading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+
+  // Settings Form State
+  const [settings, setSettings] = useState({
+    dairyName: 'BALAJI DAIRY',
+    dairyHindiName: 'श्री बालाजी डेयरी',
+    tagline: 'Fresh Milk & Dairy Products',
+    ownerName: '',
+    phone: '',
+    email: '',
+    address: '',
+    fssaiNumber: '',
+    gstNumber: '',
+    billFooterNotes: 'Thank you for your business! Please settle pending balance by due date.',
+    morningShiftStart: '05:00',
+    eveningShiftStart: '16:00',
+    varianceToleranceLiters: 5,
+    defaultCowRate: 45,
+    defaultBuffaloRate: 65,
+    currencySymbol: '₹',
+  });
 
   // Password state
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [passError, setPassError] = useState('');
-  const [passSuccess, setPassSuccess] = useState('');
   const [passLoading, setPassLoading] = useState(false);
 
-  // Backup/Restore State
-  const [restoreFile, setRestoreFile] = useState(null);
-  const [backupError, setBackupError] = useState('');
-  const [backupSuccess, setBackupSuccess] = useState('');
+  // Backup / Restore State
   const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreFile, setRestoreFile] = useState(null);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
 
-  // Audit Logs state
-  const [logs, setLogs] = useState([]);
-  const [logsLoading, setLogsLoading] = useState(true);
-  const [logSearch, setLogSearch] = useState('');
-  const [logAction, setLogAction] = useState('');
+  useEffect(() => {
+    fetchSettings();
+  }, []);
 
-  // Active section toggles for mobile accordion settings groups
-  const [activeGroup, setActiveGroup] = useState('profile'); // profile, security, backup, logs
+  const fetchSettings = async () => {
+    try {
+      setLoading(true);
+      const res = await settingService.getSettings();
+      if (res.success && res.data) {
+        setSettings((prev) => ({ ...prev, ...res.data }));
+      }
+    } catch (err) {
+      console.error(err);
+      showError('Failed to load system settings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSettingsChange = (e) => {
+    const { name, value, type } = e.target;
+    setSettings((prev) => ({
+      ...prev,
+      [name]: type === 'number' ? Number(value) : value,
+    }));
+  };
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    try {
+      setSaveLoading(true);
+      const res = await settingService.updateSettings(settings);
+      if (res.success) {
+        showSuccess('Dairy settings saved successfully! / सेटिंग्स सफलतापूर्वक सहेजी गईं');
+      }
+    } catch (err) {
+      console.error(err);
+      showError(err.message || 'Failed to save settings');
+    } finally {
+      setSaveLoading(false);
+    }
+  };
 
   const handlePasswordChange = async (e) => {
     e.preventDefault();
-    setPassError('');
-    setPassSuccess('');
-
     if (newPassword !== confirmPassword) {
-      setPassError('New passwords do not match');
+      showWarning('New password and confirmation password do not match');
       return;
     }
     if (newPassword.length < 6) {
-      setPassError('Password must be at least 6 characters long');
+      showWarning('New password must be at least 6 characters long');
       return;
     }
 
@@ -47,59 +118,51 @@ const Settings = ({ setActiveTab }) => {
       setPassLoading(true);
       const res = await authService.changePassword(oldPassword, newPassword);
       if (res.success) {
-        setPassSuccess('Password updated successfully');
+        showSuccess('Password updated successfully! / पासवर्ड बदल दिया गया है');
         setOldPassword('');
         setNewPassword('');
         setConfirmPassword('');
       }
     } catch (err) {
-      setPassError(err.message || 'Failed to change password');
+      console.error(err);
+      showError(err.message || 'Failed to change password');
     } finally {
       setPassLoading(false);
     }
   };
 
   const handleBackupDownload = async () => {
-    setBackupError('');
-    setBackupSuccess('');
     try {
       setBackupLoading(true);
       const blob = await backupService.triggerExport();
       const url = window.URL.createObjectURL(new Blob([blob]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `balaji_dairy_backup_${Date.now()}.json`);
+      link.setAttribute('download', `balaji_dairy_backup_${new Date().toISOString().split('T')[0]}.json`);
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
-      setBackupSuccess('Database backup file downloaded successfully');
+      showSuccess('System backup JSON downloaded successfully! / बैकअप डाउनलोड हो गया');
     } catch (err) {
-      setBackupError('Failed to trigger database export');
       console.error(err);
+      showError('Failed to export system database backup');
     } finally {
       setBackupLoading(false);
     }
   };
 
   const handleFileChange = (e) => {
-    setRestoreFile(e.target.files[0]);
+    setRestoreFile(e.target.files[0] || null);
   };
 
-  const handleRestoreUpload = async (e) => {
-    e.preventDefault();
-    setBackupError('');
-    setBackupSuccess('');
-
+  const handleConfirmRestore = async () => {
     if (!restoreFile) {
-      setBackupError('Please select a backup JSON file first');
-      return;
-    }
-
-    if (!window.confirm('WARNING: Restoring a backup will wipe current tables (except active login user) and replace them with backup records. Proceed?')) {
+      showWarning('Please select a JSON backup file first');
       return;
     }
 
     setBackupLoading(true);
+    setShowRestoreConfirm(false);
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -107,14 +170,14 @@ const Settings = ({ setActiveTab }) => {
         const backupJson = JSON.parse(event.target.result);
         const res = await backupService.restore(backupJson);
         if (res.success) {
-          setBackupSuccess(`Database restored successfully: Loaded ${res.stats.suppliers} suppliers, ${res.stats.milkEntries} milk entries.`);
+          showSuccess(
+            `Database restored! Loaded ${res.stats?.suppliers || 0} suppliers, ${res.stats?.milkEntries || 0} milk entries, ${res.stats?.customers || 0} customers.`
+          );
           setRestoreFile(null);
-          e.target.reset();
-          loadLogs(); // Reload audit logs
         }
       } catch (err) {
-        setBackupError(err.response?.data?.message || 'Error occurred during restore: Invalid backup file structure.');
         console.error(err);
+        showError(err.response?.data?.message || 'Invalid backup JSON file or restore failed.');
       } finally {
         setBackupLoading(false);
       }
@@ -122,406 +185,409 @@ const Settings = ({ setActiveTab }) => {
     reader.readAsText(restoreFile);
   };
 
-  const loadLogs = async () => {
-    try {
-      setLogsLoading(true);
-      const res = await auditService.getLogs({ search: logSearch, action: logAction });
-      if (res.success) {
-        setLogs(res.data);
-      }
-    } catch (err) {
-      console.error('Failed to load logs:', err);
-    } finally {
-      setLogsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      loadLogs();
-    }, 400);
-    return () => clearTimeout(delayDebounce);
-  }, [logSearch, logAction]);
-
   return (
-    <div className="settings-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
-      
-      {/* Mobile Settings Accordion / List Groups */}
-      <div className="mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        
-        {/* Profile Card */}
-        <Card style={{ padding: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-            <div style={{
-              width: '44px', height: '44px', borderRadius: '50%',
-              backgroundColor: 'var(--md-sys-color-primary-container)',
-              color: 'var(--md-sys-color-on-primary-container)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: '700', fontSize: '1.1rem'
-            }}>
-              {user?.name ? user.name[0].toUpperCase() : 'B'}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontWeight: '600', fontSize: '0.95rem' }}>{user?.name || 'Owner'}</span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Role: {user?.role?.toUpperCase()}</span>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-            <Button variant="danger" onClick={logout} style={{ flex: 1, minHeight: '38px', fontSize: '0.8rem' }}>Logout Account</Button>
-            {user?.role === 'owner' && (
-              <Button variant="primary" onClick={() => setActiveTab('users')} style={{ flex: 1, minHeight: '38px', fontSize: '0.8rem' }}>Manage Users</Button>
-            )}
-            {user?.role === 'manager' && (
-              <Button variant="primary" onClick={() => setActiveTab('payments')} style={{ flex: 1, minHeight: '38px', fontSize: '0.8rem' }}>Go to Payments</Button>
-            )}
-          </div>
-        </Card>
+    <div className="settings-page">
+      <PageHeader
+        title="Dairy Settings & Configuration"
+        subtitle="डेयरी सेटिंग्स, बिलिंग प्रोफ़ाइल और सिस्टम बैकअप"
+        icon={Building2}
+      />
 
-        {/* Change Password Group */}
-        <Card style={{ padding: '0.75rem' }}>
-          <div 
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '0.25rem' }}
-            onClick={() => setActiveGroup(activeGroup === 'security' ? '' : 'security')}
+      {/* Tabs Bar */}
+      <div className="filter-card" style={{ marginBottom: '1.25rem', padding: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTab === 'profile' ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setActiveTab('profile')}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>Security & Password</span>
-            </div>
-            <span>{activeGroup === 'security' ? '▲' : '▼'}</span>
-          </div>
-
-          {activeGroup === 'security' && (
-            <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--md-sys-color-surface-variant)', paddingTop: '0.75rem' }}>
-              {passError && <div className="error-alert">{passError}</div>}
-              {passSuccess && <div className="success-alert">{passSuccess}</div>}
-              <form onSubmit={handlePasswordChange}>
-                <Input
-                  label="Old Password"
-                  type="password"
-                  value={oldPassword}
-                  onChange={(e) => setOldPassword(e.target.value)}
-                  required
-                />
-                <Input
-                  label="New Password"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                />
-                <Input
-                  label="Confirm Password"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                />
-                <Button type="submit" variant="primary" style={{ width: '100%', minHeight: '44px' }} disabled={passLoading}>
-                  {passLoading ? 'Updating...' : 'Update Password'}
-                </Button>
-              </form>
-            </div>
-          )}
-        </Card>
-
-        {/* Backup restore Group */}
-        {user?.role === 'owner' && (
-          <Card style={{ padding: '0.75rem' }}>
-            <div 
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '0.25rem' }}
-              onClick={() => setActiveGroup(activeGroup === 'backup' ? '' : 'backup')}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>Backup & Restore</span>
-              </div>
-              <span>{activeGroup === 'backup' ? '▲' : '▼'}</span>
-            </div>
-
-            {activeGroup === 'backup' && (
-              <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--md-sys-color-surface-variant)', paddingTop: '0.75rem' }}>
-                {backupError && <div className="error-alert">{backupError}</div>}
-                {backupSuccess && <div className="success-alert">{backupSuccess}</div>}
-
-                <div style={{ marginBottom: '1.25rem' }}>
-                  <label className="input-md3-label">Database Export</label>
-                  <Button
-                    variant="outlined"
-                    style={{ width: '100%', minHeight: '44px' }}
-                    onClick={handleBackupDownload}
-                    disabled={backupLoading}
-                  >
-                    {backupLoading ? 'Exporting...' : 'Download JSON Backup'}
-                  </Button>
-                </div>
-
-                <div style={{ borderTop: '1px dashed var(--md-sys-color-outline)', paddingTop: '0.75rem' }}>
-                  <label className="input-md3-label">Database Restore (Wipes Data)*</label>
-                  <form onSubmit={handleRestoreUpload}>
-                    <input
-                      type="file"
-                      accept=".json"
-                      onChange={handleFileChange}
-                      required
-                      style={{ fontSize: '0.75rem', marginBottom: '0.75rem', width: '100%' }}
-                    />
-                    <Button
-                      type="submit"
-                      variant="danger"
-                      style={{ width: '100%', minHeight: '44px' }}
-                      disabled={backupLoading || !restoreFile}
-                    >
-                      {backupLoading ? 'Restoring...' : 'Upload & Restore Backup'}
-                    </Button>
-                  </form>
-                </div>
-              </div>
-            )}
-          </Card>
-        )}
-
-        {/* Audit Logs Group */}
-        {user?.role === 'owner' && (
-          <Card style={{ padding: '0.75rem' }}>
-            <div 
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '0.25rem' }}
-              onClick={() => {
-                setActiveGroup(activeGroup === 'logs' ? '' : 'logs');
-                loadLogs();
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>Audit Trails</span>
-              </div>
-              <span>{activeGroup === 'logs' ? '▲' : '▼'}</span>
-            </div>
-
-            {activeGroup === 'logs' && (
-              <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--md-sys-color-surface-variant)', paddingTop: '0.75rem' }}>
-                <Input
-                  label="Search logs"
-                  type="text"
-                  placeholder="Search user, action, target..."
-                  value={logSearch}
-                  onChange={(e) => setLogSearch(e.target.value)}
-                />
-                
-                <div style={{ marginBottom: '1rem' }}>
-                  <label className="input-md3-label">Action Filter</label>
-                  <select className="input-md3-control" value={logAction} onChange={(e) => setLogAction(e.target.value)}>
-                    <option value="">All Actions</option>
-                    <option value="USER_LOGIN">User Login</option>
-                    <option value="SUPPLIER_ADD">Supplier Add</option>
-                    <option value="SUPPLIER_EDIT">Supplier Edit</option>
-                    <option value="SUPPLIER_DELETE">Supplier Delete</option>
-                    <option value="MILK_ENTRY_ADD">Milk Entry Add</option>
-                    <option value="MILK_ENTRY_DELETE">Milk Entry Delete</option>
-                    <option value="PAYMENT_RECORD">Payment Record</option>
-                    <option value="DATABASE_RESTORE">DB Restore</option>
-                  </select>
-                </div>
-
-                <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                  {logsLoading ? (
-                    <Loading label="Searching audit trails..." />
-                  ) : logs.length > 0 ? (
-                    logs.map((log) => (
-                      <div key={log._id} style={{
-                        padding: '0.5rem',
-                        borderBottom: '1px solid var(--md-sys-color-surface-variant)',
-                        fontSize: '0.8rem'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '600' }}>
-                          <span>{log.user}</span>
-                          <span style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.75rem' }}>
-                            {new Date(log.timestamp).toLocaleTimeString('en-IN', { hour12: false })}
-                          </span>
-                        </div>
-                        <div style={{ margin: '0.15rem 0' }}>
-                          <Badge type={log.action.includes('DELETE') ? 'error' : log.action.includes('ADD') ? 'success' : 'neutral'} style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>
-                            {log.action}
-                          </Badge>
-                        </div>
-                        <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.75rem' }}>{log.target}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <EmptyState message="No audit logs matched search criteria" />
-                  )}
-                </div>
-              </div>
-            )}
-          </Card>
-        )}
-      </div>
-
-      {/* Desktop Grid Layout Settings View */}
-      <div className="grid grid-cols-3 desktop-only" style={{ gap: '1rem', alignItems: 'start' }}>
-        
-        {/* Settings forms on left side */}
-        <div style={{ gridColumn: 'span 1' }} className="grid" style={{ gap: '1rem' }}>
-          
-          {/* Security */}
-          <Card>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', borderBottom: '1px solid var(--md-sys-color-surface-variant)', paddingBottom: '0.5rem' }}>
-              Change Password
-            </h3>
-            {passError && <div className="error-alert" style={{ marginBottom: '1rem' }}>{passError}</div>}
-            {passSuccess && <div className="success-alert" style={{ marginBottom: '1rem' }}>{passSuccess}</div>}
-
-            <form onSubmit={handlePasswordChange}>
-              <Input
-                label="Old Password"
-                type="password"
-                placeholder="Verify old password"
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-                required
-              />
-              <Input
-                label="New Password"
-                type="password"
-                placeholder="Min 6 characters"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-              />
-              <Input
-                label="Confirm New Password"
-                type="password"
-                placeholder="Repeat new password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-              />
-              <Button type="submit" variant="primary" style={{ width: '100%' }} disabled={passLoading}>
-                {passLoading ? 'Updating...' : 'Update Password'}
-              </Button>
-            </form>
-          </Card>
-
-          {/* Backup Restore */}
+            <Building2 size={16} /> Dairy Profile (डेयरी प्रोफ़ाइल)
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTab === 'operations' ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setActiveTab('operations')}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <Clock size={16} /> Operations & Shifts (शिफ्ट व दरें)
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${activeTab === 'security' ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setActiveTab('security')}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            <ShieldCheck size={16} /> Security & Password (पासवर्ड)
+          </button>
           {user?.role === 'owner' && (
-            <Card>
-              <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', borderBottom: '1px solid var(--md-sys-color-surface-variant)', paddingBottom: '0.5rem' }}>
-                Backup & Restore System
-              </h3>
-              {backupError && <div className="error-alert" style={{ marginBottom: '1rem' }}>{backupError}</div>}
-              {backupSuccess && <div className="success-alert" style={{ marginBottom: '1rem' }}>{backupSuccess}</div>}
-
-              <div style={{ marginBottom: '1.25rem' }}>
-                <label className="input-md3-label">Export Database State</label>
-                <Button
-                  variant="outlined"
-                  style={{ width: '100%' }}
-                  onClick={handleBackupDownload}
-                  disabled={backupLoading}
-                >
-                  {backupLoading ? 'Exporting...' : 'Download JSON Backup'}
-                </Button>
-              </div>
-
-              <div style={{ borderTop: '1px solid var(--md-sys-color-surface-variant)', paddingTop: '1rem' }}>
-                <label className="input-md3-label">Restore Database State*</label>
-                <form onSubmit={handleRestoreUpload}>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={handleFileChange}
-                    required
-                    style={{ fontSize: '0.75rem', marginBottom: '0.75rem', width: '100%' }}
-                  />
-                  <Button
-                    type="submit"
-                    variant="danger"
-                    style={{ width: '100%' }}
-                    disabled={backupLoading || !restoreFile}
-                  >
-                    {backupLoading ? 'Restoring...' : 'Restore Backup File'}
-                  </Button>
-                </form>
-              </div>
-            </Card>
+            <button
+              type="button"
+              className={`btn btn-sm ${activeTab === 'backup' ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => setActiveTab('backup')}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+            >
+              <Download size={16} /> Backup & Restore (डेटा बैकअप)
+            </button>
           )}
         </div>
-
-        {/* Audit Trail Logs on right side (Desktop) */}
-        {user?.role === 'owner' && (
-          <div style={{ gridColumn: 'span 2' }}>
-            <Card style={{ padding: '1rem', marginBottom: '1rem' }}>
-              <h3 style={{ fontSize: '1.05rem', fontWeight: '600', marginBottom: '0.75rem' }}>Audit Trail Logs</h3>
-              <div className="grid grid-cols-2" style={{ gap: '1rem' }}>
-                <Input
-                  label="Search Logs"
-                  type="text"
-                  placeholder="Search user, action, target..."
-                  value={logSearch}
-                  onChange={(e) => setLogSearch(e.target.value)}
-                />
-                <div>
-                  <label className="input-md3-label">Filter Action Type</label>
-                  <select className="input-md3-control" value={logAction} onChange={(e) => setLogAction(e.target.value)}>
-                    <option value="">All Actions</option>
-                    <option value="USER_LOGIN">User Login</option>
-                    <option value="SUPPLIER_ADD">Supplier Add</option>
-                    <option value="SUPPLIER_EDIT">Supplier Edit</option>
-                    <option value="SUPPLIER_DELETE">Supplier Delete</option>
-                    <option value="MILK_ENTRY_ADD">Milk Entry Add</option>
-                    <option value="MILK_ENTRY_DELETE">Milk Entry Delete</option>
-                    <option value="PAYMENT_RECORD">Payment Record</option>
-                    <option value="DATABASE_RESTORE">DB Restore</option>
-                  </select>
-                </div>
-              </div>
-            </Card>
-
-            <Card style={{ padding: '0.5rem' }}>
-              <div className="table-container" style={{ maxHeight: '420px', overflowY: 'auto' }}>
-                {logsLoading ? (
-                  <Loading label="Searching audit trails..." />
-                ) : (
-                  <table className="table" style={{ fontSize: '0.8rem' }}>
-                    <thead>
-                      <tr style={{ position: 'sticky', top: 0, backgroundColor: 'var(--md-sys-color-surface)', zIndex: 1 }}>
-                        <th>Timestamp</th>
-                        <th>User</th>
-                        <th>Action</th>
-                        <th>Target</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {logs.length > 0 ? (
-                        logs.map((log) => (
-                          <tr key={log._id}>
-                            <td style={{ color: 'var(--md-sys-color-on-surface-variant)', width: '130px' }}>
-                              {new Date(log.timestamp).toLocaleString('en-IN', { hour12: false })}
-                            </td>
-                            <td style={{ fontWeight: '500' }}>{log.user}</td>
-                            <td>
-                              <Badge type={log.action.includes('DELETE') ? 'error' : log.action.includes('ADD') ? 'success' : 'neutral'}>
-                                {log.action}
-                              </Badge>
-                            </td>
-                            <td>{log.target}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan="4" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
-                            No audit log entries matched search criteria.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </Card>
-          </div>
-        )}
       </div>
 
+      {/* TAB 1: DAIRY PROFILE */}
+      {activeTab === 'profile' && (
+        <div className="dairy-card" style={{ maxWidth: '900px' }}>
+          <div className="dairy-card-header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Building2 size={20} color="var(--dairy-gold)" />
+            <span style={{ fontWeight: '700', fontSize: '1.1rem' }}>Business Profile & Legal Details</span>
+          </div>
+
+          <form onSubmit={handleSaveSettings} className="dairy-card-body">
+            <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+              <div className="form-group">
+                <label className="form-label">Dairy Brand Name (English)</label>
+                <input
+                  type="text"
+                  name="dairyName"
+                  className="form-control"
+                  value={settings.dairyName}
+                  onChange={handleSettingsChange}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Dairy Hindi Name (हिंदी नाम)</label>
+                <input
+                  type="text"
+                  name="dairyHindiName"
+                  className="form-control"
+                  value={settings.dairyHindiName}
+                  onChange={handleSettingsChange}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Tagline / Slogan</label>
+                <input
+                  type="text"
+                  name="tagline"
+                  className="form-control"
+                  value={settings.tagline}
+                  onChange={handleSettingsChange}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Proprietor / Owner Name</label>
+                <input
+                  type="text"
+                  name="ownerName"
+                  className="form-control"
+                  value={settings.ownerName}
+                  onChange={handleSettingsChange}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Official Phone / Mobile</label>
+                <input
+                  type="text"
+                  name="phone"
+                  className="form-control"
+                  value={settings.phone}
+                  onChange={handleSettingsChange}
+                  placeholder="e.g. 9876543210"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <input
+                  type="email"
+                  name="email"
+                  className="form-control"
+                  value={settings.email}
+                  onChange={handleSettingsChange}
+                  placeholder="e.g. balajidairy@gmail.com"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">FSSAI License Number</label>
+                <input
+                  type="text"
+                  name="fssaiNumber"
+                  className="form-control"
+                  value={settings.fssaiNumber}
+                  onChange={handleSettingsChange}
+                  placeholder="14-digit FSSAI number"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">GSTIN / Tax ID</label>
+                <input
+                  type="text"
+                  name="gstNumber"
+                  className="form-control"
+                  value={settings.gstNumber}
+                  onChange={handleSettingsChange}
+                  placeholder="15-digit GST Number"
+                />
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginTop: '1rem' }}>
+              <label className="form-label">Complete Dairy Address / Location</label>
+              <textarea
+                name="address"
+                className="form-control"
+                rows="2"
+                value={settings.address}
+                onChange={handleSettingsChange}
+                placeholder="Village/Town, Tehsil, District, State, PIN"
+              ></textarea>
+            </div>
+
+            <div className="form-group" style={{ marginTop: '1rem' }}>
+              <label className="form-label">Customer Bill Statement Footer Notes (बिल फ़ुटर नोट)</label>
+              <textarea
+                name="billFooterNotes"
+                className="form-control"
+                rows="2"
+                value={settings.billFooterNotes}
+                onChange={handleSettingsChange}
+                placeholder="Message displayed at bottom of printed bills & WhatsApp statements"
+              ></textarea>
+            </div>
+
+            <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="submit" className="btn btn-primary" disabled={saveLoading}>
+                <Save size={16} /> {saveLoading ? 'Saving Profile...' : 'Save Dairy Profile'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* TAB 2: OPERATIONS & SHIFTS */}
+      {activeTab === 'operations' && (
+        <div className="dairy-card" style={{ maxWidth: '900px' }}>
+          <div className="dairy-card-header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Clock size={20} color="var(--dairy-gold)" />
+            <span style={{ fontWeight: '700', fontSize: '1.1rem' }}>Shift Timings & Variance Thresholds</span>
+          </div>
+
+          <form onSubmit={handleSaveSettings} className="dairy-card-body">
+            <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+              <div className="form-group">
+                <label className="form-label">Morning Shift Start Time (सुबह शिफ्ट)</label>
+                <input
+                  type="time"
+                  name="morningShiftStart"
+                  className="form-control"
+                  value={settings.morningShiftStart}
+                  onChange={handleSettingsChange}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Evening Shift Start Time (शाम शिफ्ट)</label>
+                <input
+                  type="time"
+                  name="eveningShiftStart"
+                  className="form-control"
+                  value={settings.eveningShiftStart}
+                  onChange={handleSettingsChange}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Reconciliation Variance Tolerance (Liters)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  name="varianceToleranceLiters"
+                  className="form-control"
+                  value={settings.varianceToleranceLiters}
+                  onChange={handleSettingsChange}
+                  placeholder="e.g. 5"
+                />
+                <span className="text-muted" style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>
+                  If daily milk variance exceeds this limit, an alert will be triggered.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Default Cow Milk Sale Rate (₹/L)</label>
+                <input
+                  type="number"
+                  step="1"
+                  name="defaultCowRate"
+                  className="form-control"
+                  value={settings.defaultCowRate}
+                  onChange={handleSettingsChange}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Default Buffalo Milk Sale Rate (₹/L)</label>
+                <input
+                  type="number"
+                  step="1"
+                  name="defaultBuffaloRate"
+                  className="form-control"
+                  value={settings.defaultBuffaloRate}
+                  onChange={handleSettingsChange}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Currency Symbol</label>
+                <input
+                  type="text"
+                  name="currencySymbol"
+                  className="form-control"
+                  value={settings.currencySymbol}
+                  onChange={handleSettingsChange}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="submit" className="btn btn-primary" disabled={saveLoading}>
+                <Save size={16} /> {saveLoading ? 'Saving Parameters...' : 'Save Operations Settings'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* TAB 3: SECURITY & PASSWORD */}
+      {activeTab === 'security' && (
+        <div className="dairy-card" style={{ maxWidth: '650px' }}>
+          <div className="dairy-card-header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <KeyRound size={20} color="var(--dairy-gold)" />
+            <span style={{ fontWeight: '700', fontSize: '1.1rem' }}>Change Account Password</span>
+          </div>
+
+          <form onSubmit={handlePasswordChange} className="dairy-card-body">
+            <div className="form-group">
+              <label className="form-label">Current / Old Password</label>
+              <input
+                type="password"
+                className="form-control"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                placeholder="Enter current password"
+                required
+              />
+            </div>
+
+            <div className="form-group" style={{ marginTop: '1rem' }}>
+              <label className="form-label">New Password (नया पासवर्ड)</label>
+              <input
+                type="password"
+                className="form-control"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Minimum 6 characters"
+                required
+              />
+            </div>
+
+            <div className="form-group" style={{ marginTop: '1rem' }}>
+              <label className="form-label">Confirm New Password (पासवर्ड दोबारा लिखें)</label>
+              <input
+                type="password"
+                className="form-control"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Repeat new password"
+                required
+              />
+            </div>
+
+            <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="submit" className="btn btn-primary" disabled={passLoading}>
+                <KeyRound size={16} /> {passLoading ? 'Updating...' : 'Update Password'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* TAB 4: BACKUP & RESTORE */}
+      {activeTab === 'backup' && user?.role === 'owner' && (
+        <div className="dairy-card" style={{ maxWidth: '800px' }}>
+          <div className="dairy-card-header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Download size={20} color="var(--dairy-gold)" />
+            <span style={{ fontWeight: '700', fontSize: '1.1rem' }}>Database Backup & Emergency Restore</span>
+          </div>
+
+          <div className="dairy-card-body">
+            {/* Export Section */}
+            <div style={{ paddingBottom: '1.5rem', borderBottom: '1px solid var(--border-color)' }}>
+              <h4 style={{ fontWeight: '700', marginBottom: '0.5rem' }}>Export Full Database Snapshot</h4>
+              <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>
+                Download a JSON archive containing all Suppliers, Milk Collections, Customers, Daily Deliveries, Customer Payments, Supplier Payments, and Settings.
+              </p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleBackupDownload}
+                disabled={backupLoading}
+              >
+                <Download size={16} /> {backupLoading ? 'Generating Export...' : 'Download Complete JSON Backup'}
+              </button>
+            </div>
+
+            {/* Restore Section */}
+            <div style={{ paddingTop: '1.5rem' }}>
+              <h4 style={{ fontWeight: '700', color: 'var(--loss-red)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <AlertTriangle size={18} /> Database Restore (Wipe & Replace)
+              </h4>
+              <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>
+                Restore business records from a previously downloaded Balaji Dairy JSON backup file.
+                <strong style={{ color: 'var(--loss-red)' }}> Note: This replaces all operational tables.</strong>
+              </p>
+
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleFileChange}
+                  style={{
+                    padding: '0.5rem',
+                    border: '1px dashed var(--border-color)',
+                    borderRadius: '8px',
+                    fontSize: '0.85rem'
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={!restoreFile || backupLoading}
+                  onClick={() => setShowRestoreConfirm(true)}
+                >
+                  <Upload size={16} /> Restore from File
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Dialog for Restore */}
+      <ConfirmationDialog
+        isOpen={showRestoreConfirm}
+        title="Confirm Database Restore"
+        message="Are you sure you want to restore the database from this JSON backup? Current records will be replaced with the backup file data."
+        confirmText="Yes, Restore Database"
+        confirmVariant="danger"
+        onConfirm={handleConfirmRestore}
+        onCancel={() => setShowRestoreConfirm(false)}
+      />
     </div>
   );
 };

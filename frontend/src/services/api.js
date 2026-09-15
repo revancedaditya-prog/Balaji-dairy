@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5001/api',
+  baseURL: import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:5001/api'),
 });
 
 // Request interceptor to add JWT token
@@ -21,17 +21,15 @@ API.interceptors.response.use(
   (error) => {
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('token');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
+      // Let AuthContext handle view change smoothly
     }
     return Promise.reject(error);
   }
 );
 
 export const authService = {
-  login: async (phone, password) => {
-    const res = await API.post('/auth/login', { phone, password });
+  login: async (identifier, password) => {
+    const res = await API.post('/auth/login', { phone: identifier, email: identifier, username: identifier, password });
     return res.data;
   },
   getMe: async () => {
@@ -40,6 +38,14 @@ export const authService = {
   },
   changePassword: async (oldPassword, newPassword) => {
     const res = await API.put('/auth/change-password', { oldPassword, newPassword });
+    return res.data;
+  },
+  forgotPassword: async (identifier) => {
+    const res = await API.post('/auth/forgot-password', { identifier });
+    return res.data;
+  },
+  resetPasswordWithCode: async (identifier, resetCode, newPassword) => {
+    const res = await API.put('/auth/reset-password', { identifier, resetCode, newPassword });
     return res.data;
   },
 };
@@ -125,9 +131,192 @@ export const rateChartService = {
   },
 };
 
+export const customerService = {
+  getCustomers: async (filters = {}) => {
+    const res = await API.get('/customers', { params: filters });
+    return res.data;
+  },
+  getCustomerById: async (id) => {
+    const res = await API.get(`/customers/${id}`);
+    return res.data;
+  },
+  getNextCode: async () => {
+    const res = await API.get('/customers/next-code');
+    return res.data;
+  },
+  createCustomer: async (data) => {
+    const res = await API.post('/customers', data);
+    return res.data;
+  },
+  updateCustomer: async (id, data) => {
+    const res = await API.put(`/customers/${id}`, data);
+    return res.data;
+  },
+  deleteCustomer: async (id) => {
+    const res = await API.delete(`/customers/${id}`);
+    return res.data;
+  },
+};
+
+export const deliveryService = {
+  getDeliveries: async (filters = {}) => {
+    const res = await API.get('/deliveries', { params: filters });
+    return res.data;
+  },
+  getDailyRouteSheet: async (params = {}) => {
+    const res = await API.get('/deliveries/route-sheet', { params });
+    return res.data;
+  },
+  bulkRecordDeliveries: async (data) => {
+    const res = await API.post('/deliveries/bulk', data);
+    return res.data;
+  },
+  recordDelivery: async (data) => {
+    const res = await API.post('/deliveries', data);
+    return res.data;
+  },
+  updateDelivery: async (id, data) => {
+    const res = await API.put(`/deliveries/${id}`, data);
+    return res.data;
+  },
+  deleteDelivery: async (id) => {
+    const res = await API.delete(`/deliveries/${id}`);
+    return res.data;
+  },
+};
+
+export const customerPaymentService = {
+  recordPayment: async (data) => {
+    const res = await API.post('/customer-payments', data);
+    return res.data;
+  },
+  getPayments: async (filters = {}) => {
+    const res = await API.get('/customer-payments', { params: filters });
+    return res.data;
+  },
+  getLedgerList: async (filters = {}) => {
+    const res = await API.get('/customer-payments/ledger', { params: filters });
+    return res.data;
+  },
+  getCustomerLedger: async (code) => {
+    const res = await API.get(`/customer-payments/ledger/${code}`);
+    return res.data;
+  },
+};
+
+export const paymentService = {
+  getPayments: async (filters = {}) => {
+    const res = await API.get('/payments', { params: filters });
+    return res.data;
+  },
+  recordPayment: async (data) => {
+    const res = await API.post('/payments', data);
+    return res.data;
+  },
+  getLedger: async (filters = {}) => {
+    const res = await API.get('/payments/ledger', { params: filters });
+    return res.data;
+  },
+  getSupplierLedger: async (code) => {
+    const res = await API.get(`/payments/ledger/${code}`);
+    return res.data;
+  },
+};
+
+export const billingService = {
+  previewBill: async (data) => {
+    const res = await API.post('/billing/preview', data);
+    return res.data;
+  },
+  saveBill: async (data) => {
+    const res = await API.post('/billing', data);
+    return res.data;
+  },
+  getBills: async (filters = {}) => {
+    const res = await API.get('/billing', { params: filters });
+    return res.data;
+  },
+};
+
+export const internalUseService = {
+  getInternalUse: async (filters = {}) => {
+    const res = await API.get('/internal-use', { params: filters });
+    return res.data;
+  },
+  addInternalUse: async (data) => {
+    const res = await API.post('/internal-use', data);
+    return res.data;
+  },
+  updateInternalUse: async (id, data) => {
+    const res = await API.put(`/internal-use/${id}`, data);
+    return res.data;
+  },
+  deleteInternalUse: async (id) => {
+    const res = await API.delete(`/internal-use/${id}`);
+    return res.data;
+  },
+};
+
+export const expenseService = {
+  getExpenses: async (filters = {}) => {
+    const res = await API.get('/expenses', { params: filters });
+    return res.data;
+  },
+  getExpenseStats: async () => {
+    const res = await API.get('/expenses/stats');
+    return res.data;
+  },
+  addExpense: async (data) => {
+    const res = await API.post('/expenses', data);
+    return res.data;
+  },
+  updateExpense: async (id, data) => {
+    const res = await API.put(`/expenses/${id}`, data);
+    return res.data;
+  },
+  deleteExpense: async (id) => {
+    const res = await API.delete(`/expenses/${id}`);
+    return res.data;
+  },
+};
+
+export const reconciliationService = {
+  getDailyReconciliation: async (params = {}) => {
+    const res = await API.get('/reconciliation/daily', { params });
+    return res.data;
+  },
+  saveReconciliation: async (data) => {
+    const res = await API.post('/reconciliation', data);
+    return res.data;
+  },
+  getReconciliationHistory: async (params = {}) => {
+    const res = await API.get('/reconciliation/history', { params });
+    return res.data;
+  },
+};
+
+export const qualityService = {
+  getQualityTests: async (filters = {}) => {
+    const res = await API.get('/quality-tests', { params: filters });
+    return res.data;
+  },
+  addQualityTest: async (data) => {
+    const res = await API.post('/quality-tests', data);
+    return res.data;
+  },
+  deleteQualityTest: async (id) => {
+    const res = await API.delete(`/quality-tests/${id}`);
+    return res.data;
+  },
+};
+
 export const reportService = {
   getDashboardStats: async () => {
     const res = await API.get('/reports/dashboard-stats');
+    return res.data;
+  },
+  getProfitAnalytics: async (filters = {}) => {
+    const res = await API.get('/reports/profit-analytics', { params: filters });
     return res.data;
   },
   getChartsData: async () => {
@@ -156,21 +345,20 @@ export const reportService = {
   },
 };
 
-export const paymentService = {
-  getPayments: async (filters = {}) => {
-    const res = await API.get('/payments', { params: filters });
+export const searchService = {
+  globalSearch: async (q) => {
+    const res = await API.get('/search', { params: { q } });
     return res.data;
   },
-  recordPayment: async (data) => {
-    const res = await API.post('/payments', data);
+};
+
+export const settingService = {
+  getSettings: async () => {
+    const res = await API.get('/settings');
     return res.data;
   },
-  getLedger: async (filters = {}) => {
-    const res = await API.get('/payments/ledger', { params: filters });
-    return res.data;
-  },
-  getSupplierLedger: async (code) => {
-    const res = await API.get(`/payments/ledger/${code}`);
+  updateSettings: async (data) => {
+    const res = await API.put('/settings', data);
     return res.data;
   },
 };

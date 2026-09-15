@@ -1,0 +1,17 @@
+{
+  "short_name": "Balaji Dairy",
+  "name": "Balaji Dairy Management ERP",
+  "description": "Professional Dairy Business Operating System & Milk Ledger",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "display": "standalone",
+  "orientation": "portrait"
+}

@@ -1,398 +1,311 @@
-import React, { useState, useEffect } from 'react';
-import { reportService } from '../../services/api';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  BarChart3,
+  Calendar,
+  Download,
+  Printer,
+  Filter,
+  Users,
+  Milk,
+  ShoppingBag,
+  DollarSign,
+  TrendingUp,
+  MapPin,
+  RefreshCw
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
+import { reportService, supplierService } from '../../services/api';
+import { PageHeader, Currency, Quantity } from '../Common/UIComponents';
+import { useToast } from '../Common/Toast';
 
 const Reports = () => {
-  const [reportType, setReportType] = useState('shift-wise');
+  const { showSuccess, showError, showWarning } = useToast();
+
+  const getISTDate = () => {
+    const d = new Date();
+    const offset = 5.5 * 60 * 60 * 1000;
+    return new Date(d.getTime() + offset).toISOString().split('T')[0];
+  };
+
+  const todayStr = getISTDate();
+  const firstDayOfMonth = todayStr.substring(0, 7) + '-01';
+
+  const [activeTab, setActiveTab] = useState('shift'); // 'shift' | 'supplier' | 'village' | 'monthly' | 'yearly'
+  const [startDate, setStartDate] = useState(firstDayOfMonth);
+  const [endDate, setEndDate] = useState(todayStr);
+  const [selectedShift, setSelectedShift] = useState('');
+  const [selectedVillage, setSelectedVillage] = useState('');
+  const [villages, setVillages] = useState([]);
+
   const [loading, setLoading] = useState(false);
   const [reportData, setReportData] = useState([]);
-  const [error, setError] = useState('');
 
-  // Filters State
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterShift, setFilterShift] = useState('');
-  const [filterCode, setFilterCode] = useState('');
-  const [filterVillage, setFilterVillage] = useState('');
+  // Fetch villages for filter dropdown
+  useEffect(() => {
+    supplierService.getSuppliers().then((res) => {
+      if (res.success) {
+        const vList = [...new Set(res.data.map((s) => s.village).filter(Boolean))];
+        setVillages(vList);
+      }
+    }).catch(() => {});
+  }, []);
 
-  // Collapsible Filters Panel on Mobile
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
-
-  const loadReport = async () => {
+  const fetchReport = useCallback(async () => {
     try {
       setLoading(true);
-      setError('');
-      const filters = {
+      const params = {
         startDate,
         endDate,
-        shift: filterShift,
-        supplierCode: filterCode,
-        village: filterVillage,
+        shift: selectedShift || undefined,
+        village: selectedVillage || undefined,
       };
 
       let res;
-      switch (reportType) {
-        case 'shift-wise':
-          res = await reportService.getShiftWise(filters);
-          break;
-        case 'supplier-wise':
-          res = await reportService.getSupplierWise(filters);
-          break;
-        case 'village-wise':
-          res = await reportService.getVillageWise(filters);
-          break;
-        case 'monthly':
-          res = await reportService.getMonthly(filters);
-          break;
-        case 'yearly':
-          res = await reportService.getYearly(filters);
-          break;
-        default:
-          res = { success: false, data: [] };
-      }
+      if (activeTab === 'shift') res = await reportService.getShiftWise(params);
+      else if (activeTab === 'supplier') res = await reportService.getSupplierWise(params);
+      else if (activeTab === 'village') res = await reportService.getVillageWise(params);
+      else if (activeTab === 'monthly') res = await reportService.getMonthly(params);
+      else if (activeTab === 'yearly') res = await reportService.getYearly(params);
 
-      if (res.success) {
-        setReportData(res.data);
+      if (res && res.success) {
+        setReportData(res.data || []);
       }
     } catch (err) {
-      setError('Failed to generate report statement');
       console.error(err);
+      showError('Failed to fetch report analytics');
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, startDate, endDate, selectedShift, selectedVillage, showError]);
 
   useEffect(() => {
-    loadReport();
-  }, [reportType, startDate, endDate, filterShift, filterCode, filterVillage]);
+    fetchReport();
+  }, [fetchReport]);
 
-  // Aggregate stats from report data
-  const totalMilk = reportData.reduce((sum, item) => sum + item.totalMilk, 0);
-  const totalAmount = reportData.reduce((sum, item) => sum + item.totalAmount, 0);
-  const weightedFatSum = reportData.reduce((sum, item) => sum + (item.avgFat * item.totalMilk), 0);
-  const weightedSnfSum = reportData.reduce((sum, item) => sum + (item.avgSnf * item.totalMilk), 0);
-  const avgFat = totalMilk > 0 ? weightedFatSum / totalMilk : 0;
-  const avgSnf = totalMilk > 0 ? weightedSnfSum / totalMilk : 0;
+  // Overall totals in current report
+  const totalMilk = Math.round(reportData.reduce((sum, r) => sum + (r.totalMilk || 0), 0) * 100) / 100;
+  const totalAmount = Math.round(reportData.reduce((sum, r) => sum + (r.totalAmount || 0), 0) * 100) / 100;
+  const totalEntries = reportData.reduce((sum, r) => sum + (r.entryCount || 0), 0);
+  const avgRate = totalMilk > 0 ? Math.round((totalAmount / totalMilk) * 100) / 100 : 0;
 
-  const getHeaders = () => {
-    switch (reportType) {
-      case 'shift-wise':
-        return ['Date', 'Shift', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
-      case 'supplier-wise':
-        return ['Code', 'Supplier Name', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
-      case 'village-wise':
-        return ['Village', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
-      case 'monthly':
-        return ['Month (YYYY-MM)', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
-      case 'yearly':
-        return ['Year', 'Liters Collected', 'Avg FAT (%)', 'Avg SNF (%)', 'Total Amount', 'No. Entries'];
-      default:
-        return [];
+  const handleExportExcel = () => {
+    if (reportData.length === 0) {
+      showWarning('No report data to export');
+      return;
     }
-  };
 
-  const getRowCells = (item) => {
-    const commonCells = [
-      `${item.totalMilk.toFixed(2)} L`,
-      `${item.avgFat.toFixed(2)}%`,
-      `${item.avgSnf.toFixed(2)}%`,
-      `₹${item.totalAmount.toFixed(2)}`,
-      item.entryCount
-    ];
-
-    switch (reportType) {
-      case 'shift-wise':
-        return [item.date, item.shift, ...commonCells];
-      case 'supplier-wise':
-        return [`#${item.supplierCode}`, item.supplierName, ...commonCells];
-      case 'village-wise':
-        return [item.village, ...commonCells];
-      case 'monthly':
-        return [item.month, ...commonCells];
-      case 'yearly':
-        return [item.year, ...commonCells];
-      default:
-        return [];
-    }
-  };
-
-  const getMobileCardLabel = (item) => {
-    switch (reportType) {
-      case 'shift-wise':
-        return `${item.date} • ${item.shift}`;
-      case 'supplier-wise':
-        return `#${item.supplierCode} - ${item.supplierName}`;
-      case 'village-wise':
-        return `Village: ${item.village}`;
-      case 'monthly':
-        return `Month: ${item.month}`;
-      case 'yearly':
-        return `Year: ${item.year}`;
-      default:
-        return 'Summary Record';
-    }
-  };
-
-  // Excel Export
-  const exportExcel = () => {
-    const headers = getHeaders();
-    const rows = reportData.map((item) => {
-      const row = {};
-      const cells = getRowCells(item);
-      headers.forEach((h, idx) => {
-        row[h] = cells[idx];
-      });
-      return row;
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
-    XLSX.writeFile(workbook, `Report_${reportType}_${startDate}_to_${endDate}.xlsx`);
-  };
-
-  // PDF Export
-  const exportPDF = () => {
-    const printContent = `
-      <html>
-        <head>
-          <title>${reportType.toUpperCase()} REPORT - Balaji Dairy</title>
-          <style>
-            body { font-family: sans-serif; padding: 20px; color: #333; }
-            h2 { text-align: center; color: #1e40af; margin-bottom: 5px; }
-            h4 { text-align: center; font-weight: normal; margin-top: 0; color: #666; }
-            .kpi-section { display: flex; justify-content: space-between; margin: 20px 0; border: 1px solid #d1d5db; padding: 15px; border-radius: 8px; font-size: 13px; }
-            .kpi-item { text-align: center; flex: 1; }
-            .kpi-val { font-size: 16px; font-weight: bold; color: #1e40af; margin-top: 3px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 11px; }
-            th { background-color: #f3f4f6; color: #4b5563; font-weight: bold; border: 1px solid #d1d5db; padding: 6px; text-align: left; }
-            td { border: 1px solid #e5e7eb; padding: 6px; }
-            tr:nth-child(even) { background-color: #f9fafb; }
-          </style>
-        </head>
-        <body>
-          <h2>BALAJI DAIRY COLLECTION STATION</h2>
-          <h4>${reportType.toUpperCase()} SUMMARY STATEMENT (${startDate} to ${endDate})</h4>
-          <div class="kpi-section">
-            <div class="kpi-item">Total Milk Volume<div class="kpi-val">${totalMilk.toFixed(2)} L</div></div>
-            <div class="kpi-item">Weighted Avg FAT<div class="kpi-val">${avgFat.toFixed(2)}%</div></div>
-            <div class="kpi-item">Weighted Avg SNF<div class="kpi-val">${avgSnf.toFixed(2)}%</div></div>
-            <div class="kpi-item">Total Valuation<div class="kpi-val">₹${totalAmount.toFixed(2)}</div></div>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                ${getHeaders().map(h => `<th>${h}</th>`).join('')}
-              </tr>
-            </thead>
-            <tbody>
-              ${reportData.map(item => `
-                <tr>
-                  ${getRowCells(item).map(cell => `<td>${cell}</td>`).join('')}
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `;
-
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
+    const ws = XLSX.utils.json_to_sheet(reportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Report_${activeTab}`);
+    XLSX.writeFile(wb, `Balaji_Dairy_Report_${activeTab}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    showSuccess('Exported report to Excel');
   };
 
   return (
-    <div className="reports-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
-      {/* Select Report Mode Buttons */}
-      <Card style={{ padding: '0.75rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', gap: '0.35rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
-          {[
-            { id: 'shift-wise', name: 'Shift-wise' },
-            { id: 'supplier-wise', name: 'Farmer-wise' },
-            { id: 'village-wise', name: 'Village-wise' },
-            { id: 'monthly', name: 'Monthly' },
-            { id: 'yearly', name: 'Yearly' },
-          ].map((item) => (
-            <Button
-              key={item.id}
-              variant={reportType === item.id ? 'primary' : 'outlined'}
-              onClick={() => setReportType(item.id)}
-              style={{ minHeight: '38px', padding: '0.5rem 1rem', whiteSpace: 'nowrap', fontSize: '0.85rem' }}
-            >
-              {item.name}
-            </Button>
-          ))}
-        </div>
-      </Card>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <PageHeader
+        title="Reports & Analytics Hub"
+        hindiTitle="व्यापार रिपोर्ट व विश्लेषण"
+        subtitle="In-depth analytics for procurement shifts, supplier volumes, village contributions, and monthly milk trends."
+        actions={
+          <div style={{ display: 'flex', gap: '0.65rem' }}>
+            <button onClick={handleExportExcel} className="btn btn-secondary btn-sm">
+              <Download size={14} />
+              <span>Export Excel</span>
+            </button>
+            <button onClick={() => window.print()} className="btn btn-secondary btn-sm">
+              <Printer size={14} />
+              <span>Print Report</span>
+            </button>
+          </div>
+        }
+      />
 
-      <div className="grid grid-cols-3" style={{ gap: '1rem', alignItems: 'start' }}>
-        {/* Expandable Query Filters Panel */}
-        <div style={{ gridColumn: 'span 1' }}>
-          
-          {/* Mobile Collapsible Header */}
-          <Card 
-            className="mobile-only" 
-            style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: '0.5rem' }}
-            onClick={() => setFiltersExpanded(!filtersExpanded)}
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--color-border)', paddingBottom: '0.5rem', overflowX: 'auto' }}>
+        {[
+          { id: 'shift', label: 'Shift-wise Collection' },
+          { id: 'supplier', label: 'Farmer / Supplier-wise' },
+          { id: 'village', label: 'Village-wise Procurement' },
+          { id: 'monthly', label: 'Monthly Summary' },
+          { id: 'yearly', label: 'Yearly Trend' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              padding: '0.55rem 1rem',
+              borderRadius: 'var(--radius-md)',
+              border: `1.5px solid ${activeTab === tab.id ? 'var(--color-primary)' : 'transparent'}`,
+              backgroundColor: activeTab === tab.id ? 'var(--color-primary)' : 'var(--color-surface)',
+              color: activeTab === tab.id ? '#FFFFFF' : 'var(--color-text-secondary)',
+              fontWeight: 700,
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'var(--transition-fast)',
+            }}
           >
-            <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>Configure Search Filters</span>
-            <span>{filtersExpanded ? '▲' : '▼'}</span>
-          </Card>
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-          {/* Actual Filters Box */}
-          <div className={`${!filtersExpanded ? 'desktop-only' : ''}`}>
-            <Card style={{ padding: '1.25rem' }}>
-              <h3 className="desktop-only" style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', borderBottom: '1px solid var(--md-sys-color-surface-variant)', paddingBottom: '0.5rem' }}>
-                Query Filters
-              </h3>
-              
-              <Input
-                label="Start Date"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-              <Input
-                label="End Date"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-
-              {reportType === 'shift-wise' && (
-                <div className="form-group">
-                  <label className="input-md3-label">Shift</label>
-                  <select className="input-md3-control" value={filterShift} onChange={(e) => setFilterShift(e.target.value)}>
-                    <option value="">All Shifts</option>
-                    <option value="Morning">Morning</option>
-                    <option value="Evening">Evening</option>
-                  </select>
-                </div>
-              )}
-
-              <Input
-                label="Village Filter"
-                type="text"
-                placeholder="Village name..."
-                value={filterVillage}
-                onChange={(e) => setFilterVillage(e.target.value)}
-              />
-
-              {reportType === 'supplier-wise' && (
-                <Input
-                  label="Farmer Code Filter"
-                  type="number"
-                  placeholder="Farmer code..."
-                  value={filterCode}
-                  onChange={(e) => setFilterCode(e.target.value)}
-                />
-              )}
-
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                <Button variant="outlined" style={{ flex: 1, minHeight: '40px' }} onClick={exportExcel}>Excel</Button>
-                <Button variant="outlined" style={{ flex: 1, minHeight: '40px' }} onClick={exportPDF}>Print PDF</Button>
-              </div>
-            </Card>
+      {/* Filters Bar */}
+      <div className="card" style={{ padding: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div>
+            <label className="form-label">From Date</label>
+            <input
+              type="date"
+              className="form-control"
+              style={{ width: '160px', height: '40px' }}
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
           </div>
+
+          <div>
+            <label className="form-label">To Date</label>
+            <input
+              type="date"
+              className="form-control"
+              style={{ width: '160px', height: '40px' }}
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </div>
+
+          <div style={{ minWidth: '140px' }}>
+            <label className="form-label">Shift</label>
+            <select
+              className="form-control"
+              style={{ height: '40px' }}
+              value={selectedShift}
+              onChange={(e) => setSelectedShift(e.target.value)}
+            >
+              <option value="">All Shifts</option>
+              <option value="Morning">Morning</option>
+              <option value="Evening">Evening</option>
+            </select>
+          </div>
+
+          <div style={{ minWidth: '160px' }}>
+            <label className="form-label">Village</label>
+            <select
+              className="form-control"
+              style={{ height: '40px' }}
+              value={selectedVillage}
+              onChange={(e) => setSelectedVillage(e.target.value)}
+            >
+              <option value="">All Villages</option>
+              {villages.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+
+          <button onClick={fetchReport} className="btn btn-primary" style={{ height: '40px' }}>
+            <RefreshCw size={14} className={loading ? 'spinner' : ''} />
+            <span>Apply Filters</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Report Summary Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+        <div className="card" style={{ background: '#FFF8E7', borderColor: '#E8D49E' }}>
+          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#92400E' }}>Total Milk Volume</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.2rem' }} className="font-mono-num">
+            {totalMilk.toLocaleString('en-IN')} L
+          </div>
+          <div style={{ fontSize: '0.725rem', color: '#B45309' }}>{totalEntries} Total Collection Slips</div>
         </div>
 
-        {/* Aggregates Summary and List Grid */}
-        <div style={{ gridColumn: 'span 2' }}>
-          {error && <div className="error-alert" style={{ marginBottom: '1rem' }}>{error}</div>}
-
-          {/* Aggregates Dashboard Row */}
-          <div className="grid grid-cols-4" style={{ marginBottom: '1rem' }}>
-            <Card style={{ padding: '0.75rem', textAlign: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Total Volume</span>
-              <h4 style={{ color: 'var(--md-sys-color-primary)', fontSize: '1.15rem', marginTop: '0.25rem' }}>{totalMilk.toFixed(2)} L</h4>
-            </Card>
-            <Card style={{ padding: '0.75rem', textAlign: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Weighted FAT</span>
-              <h4 style={{ color: 'var(--md-sys-color-on-surface)', fontSize: '1.15rem', marginTop: '0.25rem' }}>{avgFat.toFixed(2)}%</h4>
-            </Card>
-            <Card style={{ padding: '0.75rem', textAlign: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Weighted SNF</span>
-              <h4 style={{ color: 'var(--md-sys-color-on-surface)', fontSize: '1.15rem', marginTop: '0.25rem' }}>{avgSnf.toFixed(2)}%</h4>
-            </Card>
-            <Card style={{ padding: '0.75rem', textAlign: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Valuation</span>
-              <h4 style={{ color: 'var(--md-sys-color-success)', fontSize: '1.15rem', marginTop: '0.25rem' }}>₹{totalAmount.toFixed(2)}</h4>
-            </Card>
+        <div className="card" style={{ background: '#FAF5FF', borderColor: '#E9D5FF' }}>
+          <div style={{ fontSize: '0.725rem', fontWeight: 700, color: '#7E22CE' }}>Total Amount Paid/Accrued</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.2rem' }} className="font-mono-num">
+            ₹{totalAmount.toLocaleString('en-IN')}
           </div>
+          <div style={{ fontSize: '0.725rem', color: '#9333EA' }}>Avg Price: ₹{avgRate}/L</div>
+        </div>
+      </div>
 
-          {/* Desktop Results Table */}
-          <Card style={{ padding: '1rem' }} className="desktop-only">
-            <div className="table-container">
+      {/* Report Table */}
+      <div className="card">
+        <div className="table-responsive">
+          <table className="dairy-table">
+            <thead>
+              <tr>
+                {activeTab === 'shift' && <th>Date & Shift</th>}
+                {activeTab === 'supplier' && <th>Farmer Code & Name</th>}
+                {activeTab === 'village' && <th>Village Name</th>}
+                {activeTab === 'monthly' && <th>Month (YYYY-MM)</th>}
+                {activeTab === 'yearly' && <th>Year</th>}
+                <th>Total Milk (L)</th>
+                <th>Weighted Avg Fat</th>
+                <th>Weighted Avg SNF</th>
+                <th>Total Amount (₹)</th>
+                <th>Avg Rate (₹/L)</th>
+                <th>Slips Count</th>
+              </tr>
+            </thead>
+            <tbody>
               {loading ? (
-                <Loading label="Aggregating records..." />
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      {getHeaders().map((h) => <th key={h}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reportData.length > 0 ? (
-                      reportData.map((item, idx) => (
-                        <tr key={idx}>
-                          {getRowCells(item).map((cell, cIdx) => (
-                            <td key={cIdx} style={cIdx === 0 ? { fontWeight: '600' } : {}}>
-                              {cell}
-                            </td>
-                          ))}
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={getHeaders().length} style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
-                          No records logged in the system matching filters.
+                <tr>
+                  <td colSpan="7" style={{ textAlign: 'center', padding: '3rem' }}>
+                    <div className="spinner spinner-gold" style={{ margin: '0 auto 0.5rem auto' }} />
+                    <p>Generating report analytics...</p>
+                  </td>
+                </tr>
+              ) : reportData.length > 0 ? (
+                reportData.map((row, idx) => {
+                  const ratePerL = row.totalMilk > 0 ? Math.round((row.totalAmount / row.totalMilk) * 100) / 100 : 0;
+                  return (
+                    <tr key={idx}>
+                      {activeTab === 'shift' && (
+                        <td style={{ fontWeight: 700 }}>
+                          {row.date} ({row.shift})
                         </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                      )}
+                      {activeTab === 'supplier' && (
+                        <td>
+                          <span className="badge badge-gold font-mono-num" style={{ marginRight: '6px' }}>#{row.supplierCode}</span>
+                          <strong>{row.supplierName}</strong>
+                        </td>
+                      )}
+                      {activeTab === 'village' && (
+                        <td style={{ fontWeight: 700 }}>{row.village || 'Unknown Village'}</td>
+                      )}
+                      {activeTab === 'monthly' && (
+                        <td style={{ fontWeight: 700 }}>{row.month}</td>
+                      )}
+                      {activeTab === 'yearly' && (
+                        <td style={{ fontWeight: 700 }}>{row.year}</td>
+                      )}
+                      <td style={{ fontWeight: 800, color: 'var(--color-primary)' }} className="font-mono-num">
+                        {row.totalMilk} L
+                      </td>
+                      <td className="font-mono-num">{row.avgFat > 0 ? `${row.avgFat}%` : '—'}</td>
+                      <td className="font-mono-num">{row.avgSnf > 0 ? `${row.avgSnf}%` : '—'}</td>
+                      <td style={{ fontWeight: 800, color: 'var(--color-success-text)' }} className="font-mono-num">
+                        ₹{row.totalAmount?.toLocaleString('en-IN')}
+                      </td>
+                      <td className="font-mono-num">₹{ratePerL}</td>
+                      <td>{row.entryCount}</td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="7" style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+                    No records found for the selected criteria and date range.
+                  </td>
+                </tr>
               )}
-            </div>
-          </Card>
-
-          {/* Mobile Results Cards */}
-          <div className="mobile-card-list mobile-only">
-            {loading ? (
-              <Loading label="Aggregating records..." />
-            ) : reportData.length > 0 ? (
-              reportData.map((item, idx) => (
-                <div key={idx} className="mobile-row-card">
-                  <div className="mobile-row-card-header">
-                    <div className="mobile-row-card-title">{getMobileCardLabel(item)}</div>
-                    <Badge type="primary">{item.entryCount} Entries</Badge>
-                  </div>
-                  <div className="mobile-row-card-body">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                      <span>Milk Collected:</span>
-                      <span style={{ fontWeight: '600' }}>{item.totalMilk.toFixed(2)} L</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                      <span>Avg FAT / Avg SNF:</span>
-                      <span>{item.avgFat.toFixed(2)}% / {item.avgSnf.toFixed(2)}%</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', borderTop: '1px dashed var(--md-sys-color-surface-variant)', paddingTop: '0.25rem' }}>
-                      <span style={{ fontWeight: '600' }}>Total Amount:</span>
-                      <span style={{ fontWeight: '700', color: 'var(--md-sys-color-success)' }}>₹{item.totalAmount.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <EmptyState message="No collection logs match filter query" />
-            )}
-          </div>
-
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

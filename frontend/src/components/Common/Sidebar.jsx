@@ -1,109 +1,144 @@
 import React from 'react';
+import {
+  LayoutDashboard,
+  Milk,
+  Users,
+  CreditCard,
+  FileSpreadsheet,
+  Truck,
+  Receipt,
+  Scale,
+  FlaskConical,
+  DollarSign,
+  BarChart3,
+  TrendingUp,
+  ShieldCheck,
+  History,
+  Settings as SettingsIcon,
+  LogOut,
+  ShoppingBag,
+  BookOpen,
+  Coffee
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const Sidebar = ({ activeTab, setActiveTab }) => {
   const { user, logout } = useAuth();
 
-  const menuItems = [
+  // Role permissions
+  const isOwner = user?.role === 'owner';
+  const isManager = user?.role === 'manager' || isOwner;
+  const isWorker = user?.role === 'worker';
+
+  const navSections = [
     {
-      id: 'dashboard',
-      name: 'Dashboard',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="10" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-      )
+      title: 'OVERVIEW',
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, visible: true },
+      ],
     },
     {
-      id: 'collection',
-      name: 'Milk Collection',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-      )
+      title: 'MILK PROCUREMENT / खरीद',
+      items: [
+        { id: 'collection', label: 'Milk Collection', icon: Milk, visible: true },
+        { id: 'suppliers', label: 'Suppliers / Farmers', icon: Users, visible: true },
+        { id: 'supplier-ledger', label: 'Supplier Ledger', icon: BookOpen, visible: isManager },
+        { id: 'supplier-payments', label: 'Supplier Payments', icon: CreditCard, visible: isManager },
+        { id: 'rate-chart', label: 'Rate Chart', icon: FileSpreadsheet, visible: isManager },
+      ],
     },
     {
-      id: 'suppliers',
-      name: 'Suppliers',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      )
+      title: 'MILK SALES / बिक्री',
+      items: [
+        { id: 'daily-delivery', label: 'Daily Delivery', icon: Truck, visible: true },
+        { id: 'customers', label: 'Customers Master', icon: ShoppingBag, visible: true },
+        { id: 'customer-payments', label: 'Customer Payments', icon: CreditCard, visible: isManager },
+        { id: 'customer-ledger', label: 'Customer Ledger', icon: BookOpen, visible: isManager },
+        { id: 'billing', label: 'Customer Billing', icon: Receipt, visible: isManager },
+      ],
     },
     {
-      id: 'payments',
-      name: 'Payment Ledger',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
-      )
+      title: 'OPERATIONS',
+      items: [
+        { id: 'reconciliation', label: 'Milk Reconciliation', icon: Scale, visible: isManager },
+        { id: 'internal-use', label: 'Internal Milk Use', icon: Coffee, visible: true },
+        { id: 'quality-tests', label: 'Quality Tests', icon: FlaskConical, visible: isManager },
+        { id: 'expenses', label: 'Expenses', icon: DollarSign, visible: isManager },
+      ],
     },
     {
-      id: 'reports',
-      name: 'Reports',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
-      )
+      title: 'REPORTS & ANALYTICS',
+      items: [
+        { id: 'reports', label: 'Reports Hub', icon: BarChart3, visible: isManager },
+        { id: 'profit-analytics', label: 'Profit & Margin', icon: TrendingUp, visible: isOwner },
+      ],
     },
     {
-      id: 'users',
-      name: 'User Management',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      )
+      title: 'ADMIN & SYSTEM',
+      items: [
+        { id: 'users', label: 'Users & Roles', icon: ShieldCheck, visible: isOwner },
+        { id: 'audit-logs', label: 'Audit Log', icon: History, visible: isOwner },
+        { id: 'settings', label: 'Settings & Backup', icon: SettingsIcon, visible: isOwner },
+      ],
     },
-    {
-      id: 'settings',
-      name: 'Settings & Logs',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      )
-    }
   ];
 
-  const filteredMenuItems = menuItems.filter((item) => {
-    if (user?.role === 'worker') {
-      return ['dashboard', 'collection', 'suppliers'].includes(item.id);
-    }
-    if (user?.role === 'manager') {
-      return ['dashboard', 'collection', 'suppliers', 'payments', 'reports'].includes(item.id);
-    }
-    return true;
-  });
-
   return (
-    <aside className="sidebar">
+    <aside className="sidebar desktop-only">
+      {/* Brand Header */}
       <div className="sidebar-brand">
         <div className="brand-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="28" height="28" className="text-primary-accent"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          <Milk size={26} strokeWidth={2.5} />
         </div>
-        <div className="brand-text">
-          <h2>Balaji Dairy</h2>
-          <span>Management System</span>
+        <div className="brand-info">
+          <h1>BALAJI DAIRY</h1>
+          <span>Operations ERP</span>
         </div>
       </div>
 
+      {/* Grouped Navigation */}
       <nav className="sidebar-nav">
-        {filteredMenuItems.map((item) => (
-          <button
-            key={item.id}
-            className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(item.id)}
-          >
-            {item.icon}
-            <span>{item.name}</span>
-          </button>
-        ))}
+        {navSections.map((section, idx) => {
+          const visibleItems = section.items.filter((item) => item.visible);
+          if (visibleItems.length === 0) return null;
+
+          return (
+            <div key={idx} className="nav-group">
+              <div className="nav-section-title">{section.title}</div>
+              {visibleItems.map((item) => {
+                const IconComponent = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveTab(item.id)}
+                    className={`nav-item ${isActive ? 'active' : ''}`}
+                  >
+                    <IconComponent size={18} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
       </nav>
 
+      {/* User Footer */}
       <div className="sidebar-footer">
         <div className="user-profile">
-          <div className="avatar">
-            {user?.name ? user.name[0].toUpperCase() : 'O'}
+          <div className="user-avatar">
+            {user?.name ? user.name.charAt(0).toUpperCase() : 'B'}
           </div>
           <div className="user-info">
-            <span className="user-name">{user?.name || 'Owner'}</span>
-            <span className="user-role">{user?.role?.toUpperCase() || 'OWNER'}</span>
+            <span className="user-name">{user?.name || 'Dairy Operator'}</span>
+            <span className="user-role-badge">{user?.role || 'Staff'}</span>
           </div>
         </div>
-        <button className="btn-logout" onClick={logout} title="Sign Out">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-          <span>Logout</span>
+
+        <button onClick={logout} className="btn-sidebar-logout" title="Sign out of Balaji Dairy">
+          <LogOut size={14} />
+          <span>Sign Out</span>
         </button>
       </div>
     </aside>

@@ -1,267 +1,421 @@
-import React, { useState, useEffect } from 'react';
-import { reportService } from '../../services/api';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer
-} from 'recharts';
-import { Card, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
+  Milk,
+  Truck,
+  DollarSign,
+  TrendingUp,
+  AlertTriangle,
+  Clock,
+  ArrowRight,
+  Plus,
+  RefreshCw,
+  ShoppingBag,
+  CreditCard,
+  Users,
+  Coffee,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react';
+import { reportService } from '../../services/api';
+import { StatCard, Currency, Quantity, SkeletonLoader } from '../Common/UIComponents';
+import { useAuth } from '../../context/AuthContext';
 
-const Dashboard = () => {
-  const [stats, setStats] = useState({
-    totalSuppliers: 0,
-    todayMilk: 0,
-    todayAmount: 0,
-    morningMilk: 0,
-    eveningMilk: 0,
-    monthlyMilk: 0,
-    recentEntries: []
-  });
-  const [charts, setCharts] = useState({
-    dailyTrend: [],
-    monthlyTrend: [],
-    topSuppliers: []
-  });
+const Dashboard = ({ setActiveTab, onOpenQuickAction }) => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
 
-  const loadData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      setError('');
-      const statsRes = await reportService.getDashboardStats();
-      const chartsRes = await reportService.getChartsData();
-
-      if (statsRes.success) setStats(statsRes.data);
-      if (chartsRes.success) setCharts(chartsRes.data);
+      setError(null);
+      const res = await reportService.getDashboardStats();
+      if (res.success) {
+        setStats(res.data);
+      }
     } catch (err) {
-      setError('Failed to fetch dashboard data');
-      console.error(err);
+      console.error('Error fetching dashboard stats', err);
+      setError('Unable to load live dashboard statistics. Please refresh.');
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    loadData();
   }, []);
 
-  if (loading) {
-    return <Loading label="Loading Dashboard stats..." />;
-  }
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
-  // Formatting date for simple display
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    const dateObj = new Date(dateStr);
-    return dateObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  // Greeting generator
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return { text: 'Good Morning', hindi: 'शुभ प्रभात' };
+    if (hour < 17) return { text: 'Good Afternoon', hindi: 'शुभ दोपहर' };
+    return { text: 'Good Evening', hindi: 'शुभ संध्या' };
   };
 
+  const greeting = getGreeting();
+  const kpi = stats?.kpi || {};
+  const milkFlow = stats?.milkFlow || {};
+  const alerts = stats?.alerts || [];
+
+  if (loading && !stats) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <SkeletonLoader type="stats" count={8} />
+        <SkeletonLoader type="table" count={5} />
+      </div>
+    );
+  }
+
   return (
-    <div className="dashboard-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
-      {error && <div className="error-alert" style={{ marginBottom: '1rem' }}>{error}</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Top Welcome Banner */}
+      <div
+        className="card"
+        style={{
+          background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 100%)',
+          border: '1px solid rgba(212, 175, 55, 0.4)',
+          color: '#FFFFFF',
+          padding: '1.5rem',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', position: 'relative', zIndex: 2 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+              <span style={{ color: '#D4AF37', fontWeight: 700, fontSize: '0.85rem' }}>
+                {greeting.text} • {greeting.hindi}
+              </span>
+            </div>
+            <h1 style={{ color: '#FFFFFF', fontSize: '1.75rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>
+              BALAJI DAIRY COMMAND CENTER
+            </h1>
+            <p style={{ color: '#94A3B8', fontSize: '0.875rem', margin: '0.35rem 0 0 0' }}>
+              Real-time procurement, customer distribution, cash flow & milk accounting overview
+            </p>
+          </div>
 
-      {/* KPI Cards Row */}
-      <div className="grid grid-cols-4" style={{ marginBottom: '1.5rem' }}>
-        {/* Total Suppliers */}
-        <Card className="kpi-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="kpi-icon supplier-icon" style={{
-            backgroundColor: 'var(--md-sys-color-primary-container)',
-            color: 'var(--md-sys-color-on-primary-container)',
-            width: '48px', height: '48px', borderRadius: '12px',
-            display: 'flex', alignItems: 'center', justifycontent: 'center'
-          }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: 'auto' }}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button
+              onClick={fetchDashboardData}
+              className="btn btn-secondary btn-sm"
+              style={{ backgroundColor: 'rgba(255,255,255,0.1)', color: '#FFFFFF', borderColor: 'rgba(255,255,255,0.2)' }}
+              title="Refresh dashboard stats"
+            >
+              <RefreshCw size={14} className={loading ? 'spinner' : ''} />
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={onOpenQuickAction}
+              className="btn btn-accent btn-sm"
+              style={{ fontWeight: 800 }}
+            >
+              <Plus size={16} strokeWidth={3} />
+              <span>Quick Entry</span>
+            </button>
           </div>
-          <div className="kpi-content">
-            <span className="kpi-label" style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Active Farmers</span>
-            <h2 className="kpi-value" style={{ fontSize: '1.4rem', fontWeight: '700', marginTop: '2px' }}>{stats.totalSuppliers}</h2>
-          </div>
-        </Card>
+        </div>
+      </div>
 
-        {/* Today's Milk Volume */}
-        <Card className="kpi-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="kpi-icon milk-icon" style={{
-            backgroundColor: 'var(--md-sys-color-secondary-container)',
-            color: 'var(--md-sys-color-on-secondary-container)',
-            width: '48px', height: '48px', borderRadius: '12px',
-            display: 'flex', alignItems: 'center', justifycontent: 'center'
-          }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: 'auto' }}><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          </div>
-          <div className="kpi-content">
-            <span className="kpi-label" style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Today's Milk</span>
-            <h2 className="kpi-value" style={{ fontSize: '1.4rem', fontWeight: '700', marginTop: '2px' }}>{stats.todayMilk} L</h2>
-            <span className="kpi-subtext" style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-              M: {stats.morningMilk}L • E: {stats.eveningMilk}L
+      {/* Operational Alerts Bar */}
+      {alerts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {alerts.map((alert, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.75rem 1rem',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: alert.type === 'danger' ? 'var(--color-danger-bg)' : alert.type === 'warning' ? 'var(--color-warning-bg)' : 'var(--color-info-bg)',
+                border: `1px solid ${alert.type === 'danger' ? 'var(--color-danger-border)' : alert.type === 'warning' ? 'var(--color-warning-border)' : 'var(--color-info-border)'}`,
+                color: alert.type === 'danger' ? 'var(--color-danger-text)' : alert.type === 'warning' ? 'var(--color-warning-text)' : 'var(--color-info-text)',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                {alert.type === 'danger' ? <AlertCircle size={18} /> : <AlertTriangle size={18} />}
+                <span>{alert.title}</span>
+                <span style={{ opacity: 0.8, fontWeight: 500 }}>— {alert.message}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 8 Core KPI Cards Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+        {/* 1. Milk Collected Today */}
+        <StatCard
+          title="Milk Collected Today"
+          hindiTitle="आज की खरीद"
+          value={kpi.totalCollectedToday || 0}
+          unit="L"
+          subValue={`M: ${kpi.morningCollected || 0}L • E: ${kpi.eveningCollected || 0}L`}
+          icon={Milk}
+          variant="gold"
+          onClick={() => setActiveTab && setActiveTab('collection')}
+        />
+
+        {/* 2. Milk Sold Today */}
+        <StatCard
+          title="Milk Sold Today"
+          hindiTitle="आज की बिक्री"
+          value={kpi.totalSoldToday || 0}
+          unit="L"
+          subValue={`Sales: ₹${(kpi.totalSalesToday || 0).toLocaleString('en-IN')}`}
+          icon={Truck}
+          variant="info"
+          onClick={() => setActiveTab && setActiveTab('daily-delivery')}
+        />
+
+        {/* 3. Available / Unaccounted Milk */}
+        <StatCard
+          title="Available Balance"
+          hindiTitle="बचा हुआ दूध"
+          value={kpi.availableMilk || 0}
+          unit="L"
+          subValue={kpi.availableMilk >= 0 ? 'Surplus / In Storage' : 'Deficit / Shortage'}
+          icon={TrendingUp}
+          variant={kpi.availableMilk >= 0 ? 'success' : 'danger'}
+          onClick={() => setActiveTab && setActiveTab('reconciliation')}
+        />
+
+        {/* 4. Today's Purchase Value */}
+        <StatCard
+          title="Today Purchase Value"
+          hindiTitle="खरीद लागत"
+          value={`₹${(kpi.totalPurchaseToday || 0).toLocaleString('en-IN')}`}
+          subValue={`Avg Rate: ₹${kpi.avgPurchaseRate || 0}/L`}
+          icon={DollarSign}
+          variant="purple"
+        />
+
+        {/* 5. Today's Sales Value */}
+        <StatCard
+          title="Today Sales Value"
+          hindiTitle="बिक्री राजस्व"
+          value={`₹${(kpi.totalSalesToday || 0).toLocaleString('en-IN')}`}
+          subValue={`Avg Rate: ₹${kpi.avgSalesRate || 0}/L`}
+          icon={DollarSign}
+          variant="success"
+        />
+
+        {/* 6. Estimated Gross Margin */}
+        <StatCard
+          title="Estimated Gross Margin"
+          hindiTitle="सकल मार्जिन"
+          value={`₹${(kpi.grossMarginToday || 0).toLocaleString('en-IN')}`}
+          subValue={`Spread: ₹${kpi.grossMarginSpread || 0}/L`}
+          icon={TrendingUp}
+          variant={kpi.grossMarginToday >= 0 ? 'success' : 'danger'}
+          onClick={() => setActiveTab && setActiveTab('profit-analytics')}
+        />
+
+        {/* 7. Customer Outstanding */}
+        <StatCard
+          title="Customer Outstanding"
+          hindiTitle="ग्राहकों पर बकाया"
+          value={`₹${(kpi.totalCustomerOutstanding || 0).toLocaleString('en-IN')}`}
+          subValue="Total Pending Collection"
+          icon={ShoppingBag}
+          variant="danger"
+          onClick={() => setActiveTab && setActiveTab('customer-ledger')}
+        />
+
+        {/* 8. Supplier Payable */}
+        <StatCard
+          title="Supplier Payable"
+          hindiTitle="किसानों को देय"
+          value={`₹${(kpi.totalSupplierPayable || 0).toLocaleString('en-IN')}`}
+          subValue="Total Pending Settlements"
+          icon={Users}
+          variant="gold"
+          onClick={() => setActiveTab && setActiveTab('supplier-ledger')}
+        />
+      </div>
+
+      {/* Visual MILK FLOW Diagram */}
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-primary)', margin: 0 }}>
+              TODAY'S MILK FLOW & INVENTORY RECONCILIATION
+            </h3>
+            <span style={{ fontSize: '0.775rem', color: 'var(--color-text-muted)' }}>
+              दैनिक दूध संतुलन: संकलन ➔ बिक्री ➔ प्रोसेसिंग / पनीर ➔ वेस्टेज ➔ शेष
             </span>
           </div>
-        </Card>
-
-        {/* Today's Valuation */}
-        <Card className="kpi-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="kpi-icon payment-icon" style={{
-            backgroundColor: 'var(--md-sys-color-success-container)',
-            color: 'var(--md-sys-color-on-success-container)',
-            width: '48px', height: '48px', borderRadius: '12px',
-            display: 'flex', alignItems: 'center', justifycontent: 'center'
-          }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: 'auto' }}><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/><circle cx="18" cy="15" r="2"/></svg>
-          </div>
-          <div className="kpi-content">
-            <span className="kpi-label" style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Today's Amount</span>
-            <h2 className="kpi-value" style={{ fontSize: '1.4rem', fontWeight: '700', marginTop: '2px', color: 'var(--md-sys-color-success)' }}>₹{stats.todayAmount.toLocaleString('en-IN')}</h2>
-          </div>
-        </Card>
-
-        {/* Monthly Collection */}
-        <Card className="kpi-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div className="kpi-icon month-icon" style={{
-            backgroundColor: '#fae8ff',
-            color: '#86198f',
-            width: '48px', height: '48px', borderRadius: '12px',
-            display: 'flex', alignItems: 'center', justifycontent: 'center'
-          }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: 'auto' }}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-          </div>
-          <div className="kpi-content">
-            <span className="kpi-label" style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: '500' }}>Monthly Collection</span>
-            <h2 className="kpi-value" style={{ fontSize: '1.4rem', fontWeight: '700', marginTop: '2px' }}>{stats.monthlyMilk} L</h2>
-          </div>
-        </Card>
-      </div>
-
-      {/* Charts Grid */}
-      <div className="grid grid-cols-2" style={{ marginBottom: '1.5rem' }}>
-        {/* Daily Trend Line Chart */}
-        <Card>
-          <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--md-sys-color-on-surface)' }}>Daily Milk Collection Trend (Liters)</h3>
-          <div style={{ width: '100%', height: '240px' }}>
-            {charts.dailyTrend.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={charts.dailyTrend} margin={{ top: 5, right: 5, left: -25, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="colorMilk" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--md-sys-color-primary)" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="var(--md-sys-color-primary)" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--md-sys-color-surface-variant)" />
-                  <XAxis dataKey="date" tickFormatter={formatDate} stroke="var(--md-sys-color-on-surface-variant)" fontSize={11} />
-                  <YAxis stroke="var(--md-sys-color-on-surface-variant)" fontSize={11} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', borderColor: 'var(--md-sys-color-outline)', borderRadius: '8px' }} />
-                  <Area type="monotone" dataKey="milk" stroke="var(--md-sys-color-primary)" strokeWidth={2} fillOpacity={1} fill="url(#colorMilk)" name="Liters" />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifycontent: 'center', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.85rem' }}>No collection data logged yet</div>
-            )}
-          </div>
-        </Card>
-
-        {/* Top Suppliers Bar Chart */}
-        <Card>
-          <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--md-sys-color-on-surface)' }}>Top Suppliers (Last 30 Days)</h3>
-          <div style={{ width: '100%', height: '240px' }}>
-            {charts.topSuppliers.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={charts.topSuppliers} margin={{ top: 5, right: 5, left: -25, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--md-sys-color-surface-variant)" />
-                  <XAxis dataKey="name" stroke="var(--md-sys-color-on-surface-variant)" fontSize={11} />
-                  <YAxis stroke="var(--md-sys-color-on-surface-variant)" fontSize={11} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', borderColor: 'var(--md-sys-color-outline)', borderRadius: '8px' }} />
-                  <Bar dataKey="milk" fill="var(--md-sys-color-success)" radius={[4, 4, 0, 0]} name="Liters Collected" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifycontent: 'center', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.85rem' }}>No supplier data logged yet</div>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* Recent Entries */}
-      <Card style={{ padding: '1.25rem' }}>
-        <h3 style={{ fontSize: '1.05rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--md-sys-color-on-surface)' }}>Recent Milk Entries</h3>
-        
-        {/* Desktop view table */}
-        <div className="table-container desktop-only">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Supplier Name</th>
-                <th>Date</th>
-                <th>Shift</th>
-                <th>Quantity</th>
-                <th>Fat / SNF</th>
-                <th style={{ textAlign: 'right' }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.recentEntries.length > 0 ? (
-                stats.recentEntries.map((entry) => (
-                  <tr key={entry._id}>
-                    <td style={{ fontWeight: '600' }}>#{entry.supplierCode}</td>
-                    <td>{entry.supplierName}</td>
-                    <td>{entry.date}</td>
-                    <td>
-                      <Badge type={entry.shift === 'Morning' ? 'primary' : 'success'}>
-                        {entry.shift}
-                      </Badge>
-                    </td>
-                    <td>{entry.milkQuantity} L</td>
-                    <td>{entry.fat}% / {entry.snf}%</td>
-                    <td style={{ fontWeight: '600', color: 'var(--md-sys-color-primary)', textAlign: 'right' }}>₹{entry.amount}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="7" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
-                    No milk collection records found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <button onClick={() => setActiveTab && setActiveTab('reconciliation')} className="btn btn-secondary btn-sm">
+            <span>Detailed Reconciliation</span>
+            <ArrowRight size={14} />
+          </button>
         </div>
 
-        {/* Mobile card list (Android-first responsive layout) */}
-        <div className="mobile-card-list mobile-only">
-          {stats.recentEntries.length > 0 ? (
-            stats.recentEntries.map((entry) => (
-              <div key={entry._id} className="mobile-row-card">
-                <div className="mobile-row-card-header">
-                  <div className="mobile-row-card-title">#{entry.supplierCode} - {entry.supplierName}</div>
-                  <Badge type={entry.shift === 'Morning' ? 'primary' : 'success'}>
-                    {entry.shift}
-                  </Badge>
-                </div>
-                <div className="mobile-row-card-body" style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* Flow Pipeline Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.85rem', alignItems: 'center' }}>
+          {/* Collected */}
+          <div style={{ padding: '1rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FFF8E7', border: '1.5px solid #E8D49E', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#92400E', textTransform: 'uppercase' }}>1. Collected</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.25rem' }} className="font-mono-num">
+              {milkFlow.collected || 0} L
+            </div>
+            <div style={{ fontSize: '0.725rem', color: '#B45309', fontWeight: 600 }}>Total Inward</div>
+          </div>
+
+          <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', fontWeight: 800, fontSize: '1.2rem' }} className="desktop-only">➔</div>
+
+          {/* Customer Sale */}
+          <div style={{ padding: '1rem', borderRadius: 'var(--radius-md)', backgroundColor: '#F0F9FF', border: '1.5px solid #BAE6FD', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0369A1', textTransform: 'uppercase' }}>2. Customer Sale</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.25rem' }} className="font-mono-num">
+              {milkFlow.customerSale || 0} L
+            </div>
+            <div style={{ fontSize: '0.725rem', color: '#0284C7', fontWeight: 600 }}>Delivered</div>
+          </div>
+
+          <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', fontWeight: 800, fontSize: '1.2rem' }} className="desktop-only">➔</div>
+
+          {/* Production / Internal */}
+          <div style={{ padding: '1rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FAF5FF', border: '1.5px solid #E9D5FF', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#7E22CE', textTransform: 'uppercase' }}>3. Paneer / Khoya</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.25rem' }} className="font-mono-num">
+              {milkFlow.production || 0} L
+            </div>
+            <div style={{ fontSize: '0.725rem', color: '#9333EA', fontWeight: 600 }}>Internal Processing</div>
+          </div>
+
+          <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', fontWeight: 800, fontSize: '1.2rem' }} className="desktop-only">➔</div>
+
+          {/* Wastage */}
+          <div style={{ padding: '1rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FEF2F2', border: '1.5px solid #FECACA', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#B91C1C', textTransform: 'uppercase' }}>4. Wastage</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0F172A', marginTop: '0.25rem' }} className="font-mono-num">
+              {milkFlow.wastage || 0} L
+            </div>
+            <div style={{ fontSize: '0.725rem', color: '#DC2626', fontWeight: 600 }}>Loss / Spoilage</div>
+          </div>
+
+          <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', fontWeight: 800, fontSize: '1.2rem' }} className="desktop-only">=</div>
+
+          {/* Balance / Variance */}
+          <div style={{ padding: '1rem', borderRadius: 'var(--radius-md)', backgroundColor: (milkFlow.balance || 0) >= 0 ? '#F0FDF4' : '#FEF2F2', border: `1.5px solid ${(milkFlow.balance || 0) >= 0 ? '#BBF7D0' : '#FECACA'}`, textAlign: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: (milkFlow.balance || 0) >= 0 ? '#15803D' : '#B91C1C', textTransform: 'uppercase' }}>5. Remaining / Variance</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: (milkFlow.balance || 0) >= 0 ? '#15803D' : '#B91C1C', marginTop: '0.25rem' }} className="font-mono-num">
+              {milkFlow.balance || 0} L
+            </div>
+            <div style={{ fontSize: '0.725rem', color: (milkFlow.balance || 0) >= 0 ? '#16A34A' : '#DC2626', fontWeight: 600 }}>
+              {(milkFlow.balance || 0) >= 0 ? 'Remaining Balance' : 'Variance / Shortage'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent Activity Streams */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.25rem' }}>
+        {/* Recent Collections */}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Milk size={18} color="var(--color-accent)" />
+              <span>Recent Milk Collections</span>
+            </h4>
+            <button onClick={() => setActiveTab && setActiveTab('collection')} className="btn btn-ghost btn-sm" style={{ padding: '0.2rem 0.5rem' }}>
+              View All
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {stats?.recentCollections?.length > 0 ? (
+              stats.recentCollections.map((entry) => (
+                <div
+                  key={entry._id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--color-surface-secondary)',
+                    fontSize: '0.85rem',
+                  }}
+                >
                   <div>
-                    <div>{entry.date}</div>
-                    <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.75rem' }}>
-                      Fat/SNF: {entry.fat}% / {entry.snf}%
+                    <div style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                      #{entry.supplierCode} • {entry.supplierName}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                      {entry.date} • {entry.shift} • Fat: {entry.fat}% • SNF: {entry.snf}%
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontWeight: '600', color: 'var(--md-sys-color-on-surface)' }}>{entry.milkQuantity} Liters</div>
-                    <div style={{ fontWeight: '700', color: 'var(--md-sys-color-primary)', fontSize: '1rem' }}>₹{entry.amount}</div>
+                    <div style={{ fontWeight: 800, color: 'var(--color-primary)' }}>{entry.milkQuantity} L</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-success-text)', fontWeight: 600 }}>₹{entry.amount}</div>
                   </div>
                 </div>
+              ))
+            ) : (
+              <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                No recent collections today.
               </div>
-            ))
-          ) : (
-            <EmptyState message="No milk collection records found" />
-          )}
+            )}
+          </div>
         </div>
-      </Card>
+
+        {/* Recent Deliveries */}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Truck size={18} color="#0284C7" />
+              <span>Recent Customer Deliveries</span>
+            </h4>
+            <button onClick={() => setActiveTab && setActiveTab('daily-delivery')} className="btn btn-ghost btn-sm" style={{ padding: '0.2rem 0.5rem' }}>
+              View All
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {stats?.recentDeliveries?.length > 0 ? (
+              stats.recentDeliveries.map((del) => (
+                <div
+                  key={del._id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--color-surface-secondary)',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
+                      C#{del.customerCode} • {del.customerName}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                      {del.date} • {del.shift} • {del.status}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontWeight: 800, color: 'var(--color-primary)' }}>{del.quantity} L</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-info-text)', fontWeight: 600 }}>₹{del.amount}</div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                No deliveries recorded yet.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
