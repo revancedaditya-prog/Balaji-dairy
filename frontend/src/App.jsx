@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/Common/Sidebar';
 import BottomNavigation from './components/Common/BottomNavigation';
+import QuickAddParty from './components/Common/QuickAddParty';
 import Login from './components/Auth/Login';
 import Dashboard from './components/Dashboard/Dashboard';
 import MilkCollection from './components/MilkCollection/MilkCollection';
@@ -16,6 +17,9 @@ import './App.css';
 const MainApp = () => {
   const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddType, setQuickAddType] = useState(null);
+  const [quickMessage, setQuickMessage] = useState('');
 
   if (loading) {
     return (
@@ -29,6 +33,21 @@ const MainApp = () => {
   if (!user) {
     return <Login />;
   }
+
+  const canAddParty = ['owner', 'manager'].includes(user?.role);
+
+  const handleQuickSaved = (type) => {
+    setQuickAddType(null);
+    setQuickAddOpen(false);
+    if (type === 'supplier') {
+      setQuickMessage('Supplier added successfully');
+      setActiveTab('suppliers');
+    } else {
+      setQuickMessage('Customer added successfully');
+      setActiveTab('customerMilk');
+    }
+    window.setTimeout(() => setQuickMessage(''), 3500);
+  };
 
   const renderActiveView = () => {
     if (user?.role === 'worker' && !['dashboard', 'collection', 'suppliers', 'customerMilk'].includes(activeTab)) {
@@ -83,6 +102,45 @@ const MainApp = () => {
           <div className="topbar-title">{getPageTitle()}</div>
 
           <div className="topbar-actions">
+            {canAddParty && (
+              <div style={{ position: 'relative' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setQuickAddOpen(v => !v)}
+                  style={{ minHeight: 36, padding: '0.45rem 0.8rem', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
+                  aria-expanded={quickAddOpen}
+                  aria-label="Add supplier or customer"
+                >
+                  <span style={{ fontSize: 18, lineHeight: 1 }}>+</span>
+                  <span className="desktop-only">Add</span>
+                </button>
+                {quickAddOpen && (
+                  <div style={{
+                    position: 'absolute', right: 0, top: 'calc(100% + 8px)', zIndex: 80,
+                    minWidth: 220, padding: 8, borderRadius: 14, background: 'var(--md-sys-color-surface, #fff)',
+                    border: '1px solid var(--md-sys-color-outline-variant, #e5e7eb)', boxShadow: '0 14px 35px rgba(15,23,42,.14)'
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => { setQuickAddType('supplier'); setQuickAddOpen(false); }}
+                      style={{ width:'100%', border:0, background:'transparent', textAlign:'left', padding:'10px 12px', borderRadius:10, cursor:'pointer', fontWeight:700, color:'var(--md-sys-color-on-surface)' }}
+                    >
+                      + Add Supplier / Farmer
+                      <div style={{ fontSize: 11, fontWeight: 500, opacity: .65, marginTop: 2 }}>दूध देने वाला सप्लायर जोड़ें</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setQuickAddType('customer'); setQuickAddOpen(false); }}
+                      style={{ width:'100%', border:0, background:'transparent', textAlign:'left', padding:'10px 12px', borderRadius:10, cursor:'pointer', fontWeight:700, color:'var(--md-sys-color-on-surface)' }}
+                    >
+                      + Add Customer
+                      <div style={{ fontSize: 11, fontWeight: 500, opacity: .65, marginTop: 2 }}>दूध लेने वाला ग्राहक जोड़ें</div>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <span className="topbar-date desktop-only">
               {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
             </span>
@@ -96,11 +154,14 @@ const MainApp = () => {
         </header>
 
         <main className="content-container">
+          {quickMessage && <div className="success-alert" style={{ marginBottom: '1rem' }}>{quickMessage}</div>}
           {renderActiveView()}
         </main>
 
         <BottomNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
       </div>
+
+      <QuickAddParty type={quickAddType} onClose={() => setQuickAddType(null)} onSaved={handleQuickSaved} />
     </div>
   );
 };
