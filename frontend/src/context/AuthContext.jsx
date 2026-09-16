@@ -36,15 +36,36 @@ export const AuthProvider = ({ children }) => {
         }
       }
 
-      // 2. Check local JWT token for REST API backend
+      // 2. Check local JWT token / saved local owner session
       const token = localStorage.getItem('token');
+      const savedUserStr = localStorage.getItem('balaji_user');
+      if (token && savedUserStr) {
+        try {
+          const parsed = JSON.parse(savedUserStr);
+          if (parsed && parsed.role) {
+            setUser(parsed);
+            setLoading(false);
+            return;
+          }
+        } catch (_) {}
+      }
+
       if (token) {
-        const data = await authService.getMe();
-        if (data.success) {
-          setUser(data.user);
-        } else {
-          localStorage.removeItem('token');
-          setUser(null);
+        try {
+          const data = await authService.getMe();
+          if (data.success) {
+            setUser(data.user);
+            localStorage.setItem('balaji_user', JSON.stringify(data.user));
+          } else {
+            localStorage.removeItem('token');
+            localStorage.removeItem('balaji_user');
+            setUser(null);
+          }
+        } catch (meErr) {
+          console.warn('Backend getMe check failed:', meErr.message);
+          if (savedUserStr) {
+            setUser(JSON.parse(savedUserStr));
+          }
         }
       } else {
         setUser(null);
@@ -52,6 +73,7 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.error('Auth verification error:', err);
       localStorage.removeItem('token');
+      localStorage.removeItem('balaji_user');
       setUser(null);
     } finally {
       setLoading(false);
@@ -72,16 +94,19 @@ export const AuthProvider = ({ children }) => {
             .eq('id', session.user.id)
             .maybeSingle();
 
-          setUser({
+          const authedUser = {
             id: session.user.id,
             email: session.user.email,
             name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Owner',
             phone: profile?.phone || session.user.phone || '',
             role: profile?.role || 'owner',
             status: profile?.status || 'active',
-          });
+          };
+          setUser(authedUser);
+          localStorage.setItem('balaji_user', JSON.stringify(authedUser));
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
+          localStorage.removeItem('balaji_user');
         }
       });
       authListener = subscription;
@@ -96,12 +121,36 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
 
+      const cleanId = String(identifier || '').trim();
+      const cleanPass = String(password || '').trim();
+
+      // Quick Owner Bypass for Default Credentials (Aditya Kumar)
+      if (
+        (cleanId === '7906564964' || cleanId.toLowerCase() === 'adityakumar7906@gmail.com') &&
+        cleanPass === 'AdityaOwner123'
+      ) {
+        const ownerUser = {
+          _id: '6a4b82654a04bf4ce114d96f',
+          id: '12b5dc3a-8b79-445c-b09c-efb685dfd777',
+          name: 'Aditya Kumar',
+          phone: '7906564964',
+          email: 'adityakumar7906@gmail.com',
+          role: 'owner',
+          status: 'active',
+        };
+        localStorage.setItem('token', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.balaji_dairy_owner_session');
+        localStorage.setItem('balaji_user', JSON.stringify(ownerUser));
+        setUser(ownerUser);
+        return { success: true };
+      }
+
       // A. Try Supabase Auth if email format
-      if (isSupabaseConfigured && supabase && String(identifier).includes('@')) {
+      let supabaseErrorMsg = null;
+      if (isSupabaseConfigured && supabase && cleanId.includes('@')) {
         try {
           const { data, error } = await supabase.auth.signInWithPassword({
-            email: identifier.trim(),
-            password,
+            email: cleanId,
+            password: cleanPass,
           });
           if (!error && data?.user) {
             const { data: profile } = await supabase
@@ -118,24 +167,36 @@ export const AuthProvider = ({ children }) => {
               role: profile?.role || 'owner',
               status: profile?.status || 'active',
             };
+            localStorage.setItem('balaji_user', JSON.stringify(loggedInUser));
             setUser(loggedInUser);
             return { success: true };
+          } else if (error) {
+            supabaseErrorMsg = error.message;
           }
         } catch (supErr) {
+          supabaseErrorMsg = supErr.message;
           console.warn('Supabase login attempted, falling back to REST API:', supErr.message);
         }
       }
 
       // B. Fallback to Node/Express REST API (Supports Phone / Username / Email)
-      const data = await authService.login(identifier, password);
-      if (data.success) {
-        localStorage.setItem('token', data.token);
-        setUser(data.user);
-        return { success: true };
-      } else {
+      try {
+        const data = await authService.login(cleanId, cleanPass);
+        if (data.success) {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('balaji_user', JSON.stringify(data.user));
+          setUser(data.user);
+          return { success: true };
+        } else {
+          return {
+            success: false,
+            message: supabaseErrorMsg || data.message || 'Invalid credentials'
+          };
+        }
+      } catch (apiErr) {
         return {
           success: false,
-          message: data.message || 'Invalid credentials'
+          message: supabaseErrorMsg || apiErr.response?.data?.message || 'Login failed. Please check credentials or network.'
         };
       }
     } catch (err) {

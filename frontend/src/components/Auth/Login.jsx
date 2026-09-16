@@ -184,7 +184,7 @@ const Login = () => {
 
           <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-              <label className="form-label" style={{ margin: 0 }}>
+              <label className="form-label" style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span>Password</span>
                 <span style={{ fontSize: '0.725rem', color: 'var(--color-text-muted)' }}>पासवर्ड</span>
               </label>
@@ -228,7 +228,7 @@ const Login = () => {
             disabled={loading}
           >
             {loading ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                 <div className="spinner" style={{ width: '18px', height: '18px', borderWidth: '2px' }} />
                 <span>Signing in...</span>
               </div>
@@ -238,8 +238,76 @@ const Login = () => {
           </button>
         </form>
 
+        {/* Quick Fill Credentials Banner */}
+        <div
+          style={{
+            marginTop: '1.25rem',
+            padding: '0.85rem',
+            borderRadius: 'var(--radius-md)',
+            backgroundColor: 'rgba(212, 175, 55, 0.08)',
+            border: '1px dashed rgba(212, 175, 55, 0.4)',
+            fontSize: '0.775rem',
+            color: '#475569',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.65rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontWeight: 700, color: '#1E293B' }}>📞 Phone Login (Backend)</div>
+              <div>ID: <code style={{ color: '#B38F24', fontWeight: 600 }}>7906564964</code></div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIdentifier('7906564964');
+                setPassword('AdityaOwner123');
+              }}
+              style={{
+                padding: '0.3rem 0.6rem',
+                fontSize: '0.725rem',
+                fontWeight: 700,
+                backgroundColor: '#D4AF37',
+                color: '#0F172A',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                cursor: 'pointer',
+              }}
+            >
+              Fill Phone
+            </button>
+          </div>
+
+          <div style={{ borderTop: '1px dashed rgba(212, 175, 55, 0.25)', paddingTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontWeight: 700, color: '#1E293B' }}>⚡ Supabase Auth</div>
+              <div>Email: <code style={{ color: '#B38F24', fontWeight: 600 }}>adityakumar7906@gmail.com</code></div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIdentifier('adityakumar7906@gmail.com');
+                setPassword('');
+              }}
+              style={{
+                padding: '0.3rem 0.6rem',
+                fontSize: '0.725rem',
+                fontWeight: 700,
+                backgroundColor: 'var(--color-primary, #0F172A)',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                cursor: 'pointer',
+              }}
+            >
+              Fill Email
+            </button>
+          </div>
+        </div>
+
         {/* Footer info */}
-        <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: '1px solid var(--color-border)', textAlign: 'center' }}>
+        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--color-border)', textAlign: 'center' }}>
           <p style={{ fontSize: '0.775rem', color: 'var(--color-text-muted)', margin: 0 }}>
             Balaji Dairy Management System v2.0 • Secure Operations
           </p>

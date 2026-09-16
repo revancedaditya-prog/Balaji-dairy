@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:5001/api'),
+  baseURL: import.meta.env.VITE_API_URL || 'https://balaji-dairy-management.onrender.com/api',
+  timeout: 15000,
 });
 
 // Request interceptor to add JWT token
