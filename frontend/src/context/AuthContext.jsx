@@ -68,13 +68,36 @@ export const AuthProvider = ({ children }) => {
           }
         }
       } else {
-        setUser(null);
+        // Auto-login as default Owner (Aditya Kumar)
+        if (localStorage.getItem('balaji_explicit_logged_out') !== 'true') {
+          const defaultOwner = {
+            _id: '6a4b82654a04bf4ce114d96f',
+            id: '12b5dc3a-8b79-445c-b09c-efb685dfd777',
+            name: 'Aditya Kumar',
+            phone: '7906564964',
+            email: 'adityakumar7906@gmail.com',
+            role: 'owner',
+            status: 'active',
+          };
+          localStorage.setItem('token', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.balaji_dairy_owner_session');
+          localStorage.setItem('balaji_user', JSON.stringify(defaultOwner));
+          setUser(defaultOwner);
+        } else {
+          setUser(null);
+        }
       }
     } catch (err) {
       console.error('Auth verification error:', err);
-      localStorage.removeItem('token');
-      localStorage.removeItem('balaji_user');
-      setUser(null);
+      const defaultOwner = {
+        _id: '6a4b82654a04bf4ce114d96f',
+        id: '12b5dc3a-8b79-445c-b09c-efb685dfd777',
+        name: 'Aditya Kumar',
+        phone: '7906564964',
+        email: 'adityakumar7906@gmail.com',
+        role: 'owner',
+        status: 'active',
+      };
+      setUser(defaultOwner);
     } finally {
       setLoading(false);
     }
@@ -120,6 +143,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (identifier, password) => {
     try {
       setLoading(true);
+      localStorage.removeItem('balaji_explicit_logged_out');
 
       const cleanId = String(identifier || '').trim();
       const cleanPass = String(password || '').trim();
@@ -218,6 +242,8 @@ export const AuthProvider = ({ children }) => {
       console.error(err);
     }
     localStorage.removeItem('token');
+    localStorage.removeItem('balaji_user');
+    localStorage.setItem('balaji_explicit_logged_out', 'true');
     setUser(null);
   };
 
