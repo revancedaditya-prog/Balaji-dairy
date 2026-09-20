@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 
 const BottomNavigation = ({ activeTab, setActiveTab }) => {
@@ -55,7 +54,7 @@ const BottomNavigation = ({ activeTab, setActiveTab }) => {
       {filteredItems.map(item => {
         // If activeTab is 'users' or 'payments', highlight Settings as active bottom tab on mobile
         const isActive = activeTab === item.id || 
-          (item.id === 'settings' && ['users', 'payments'].includes(activeTab));
+          (item.id === 'settings' && ['users', 'payments', 'rates'].includes(activeTab));
 
         return (
           <button

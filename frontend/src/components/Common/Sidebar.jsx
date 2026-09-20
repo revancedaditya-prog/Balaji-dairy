@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 
 const Sidebar = ({ activeTab, setActiveTab }) => {
@@ -48,6 +47,13 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       )
     },
     {
+      id: 'rates',
+      name: 'Milk Rate Chart',
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m7 16 4-4 3 3 5-6"/></svg>
+      )
+    },
+    {
       id: 'settings',
       name: 'Settings & Logs',
       icon: (
@@ -58,10 +64,10 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
 
   const filteredMenuItems = menuItems.filter((item) => {
     if (user?.role === 'worker') {
-      return ['dashboard', 'collection', 'suppliers'].includes(item.id);
+      return ['dashboard', 'collection', 'suppliers', 'settings'].includes(item.id);
     }
     if (user?.role === 'manager') {
-      return ['dashboard', 'collection', 'suppliers', 'payments', 'reports'].includes(item.id);
+      return ['dashboard', 'collection', 'suppliers', 'payments', 'reports', 'settings'].includes(item.id);
     }
     return true;
   });

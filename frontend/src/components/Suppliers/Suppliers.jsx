@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { supplierService } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
-import * as XLSX from 'xlsx';
 import { Card, Button, Input, Badge, Modal, EmptyState, Loading } from '../Common/MaterialComponents';
+import { getISTDate } from '../../utils/dateTime';
+import { exportRowsToExcel, readFirstWorksheet } from '../../utils/excel';
+import { escapeHtml, printHtml } from '../../utils/html';
 
 const Suppliers = () => {
   const { user } = useAuth();
@@ -24,10 +26,10 @@ const Suppliers = () => {
     mobile: '',
     village: '',
     status: 'active',
-    joiningDate: new Date().toISOString().split('T')[0]
+    joiningDate: getISTDate()
   });
 
-  const loadSuppliers = async () => {
+  const loadSuppliers = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -41,15 +43,15 @@ const Suppliers = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [search, status, village]);
 
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
-      loadSuppliers();
+      void loadSuppliers();
     }, 300);
 
     return () => clearTimeout(delayDebounce);
-  }, [search, village, status]);
+  }, [loadSuppliers]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -67,7 +69,7 @@ const Suppliers = () => {
       mobile: '',
       village: '',
       status: 'active',
-      joiningDate: new Date().toISOString().split('T')[0]
+      joiningDate: getISTDate()
     });
     setEditingId(null);
     setShowModal(false);
@@ -82,7 +84,7 @@ const Suppliers = () => {
       mobile: supplier.mobile || '',
       village: supplier.village,
       status: supplier.status,
-      joiningDate: supplier.joiningDate ? supplier.joiningDate.split('T')[0] : new Date().toISOString().split('T')[0]
+      joiningDate: supplier.joiningDate ? supplier.joiningDate.split('T')[0] : getISTDate()
     });
     setShowModal(true);
   };
@@ -138,7 +140,7 @@ const Suppliers = () => {
   };
 
   // Excel Export
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     const formattedData = suppliers.map((s) => ({
       'Supplier Code': s.supplierCode,
       'Supplier Name': s.supplierName,
@@ -149,10 +151,7 @@ const Suppliers = () => {
       'Joining Date': new Date(s.joiningDate).toLocaleDateString('en-IN')
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(formattedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Suppliers');
-    XLSX.writeFile(workbook, `Suppliers_List_${new Date().toISOString().split('T')[0]}.xlsx`);
+    await exportRowsToExcel(formattedData, 'Suppliers', `Suppliers_List_${getISTDate()}.xlsx`);
   };
 
   // PDF Export
@@ -191,13 +190,13 @@ const Suppliers = () => {
             <tbody>
               ${suppliers.map(s => `
                 <tr>
-                  <td><b>#${s.supplierCode}</b></td>
-                  <td>${s.supplierName}</td>
-                  <td>${s.fatherName}</td>
-                  <td>${s.mobile}</td>
-                  <td>${s.village}</td>
-                  <td class="status-${s.status}">${s.status.toUpperCase()}</td>
-                  <td>${new Date(s.joiningDate).toLocaleDateString('en-IN')}</td>
+                  <td><b>#${escapeHtml(s.supplierCode)}</b></td>
+                  <td>${escapeHtml(s.supplierName)}</td>
+                  <td>${escapeHtml(s.fatherName)}</td>
+                  <td>${escapeHtml(s.mobile)}</td>
+                  <td>${escapeHtml(s.village)}</td>
+                  <td class="status-${s.status === 'active' ? 'active' : 'inactive'}">${escapeHtml(s.status.toUpperCase())}</td>
+                  <td>${escapeHtml(new Date(s.joiningDate).toLocaleDateString('en-IN'))}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -206,15 +205,10 @@ const Suppliers = () => {
       </html>
     `;
 
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
+    printHtml(printContent);
   };
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
     const templateData = [
       {
         'Supplier Code': 105,
@@ -226,71 +220,60 @@ const Suppliers = () => {
         'Joining Date': '2026-06-02'
       }
     ];
-    const worksheet = XLSX.utils.json_to_sheet(templateData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
-    XLSX.writeFile(workbook, 'Supplier_Import_Template.xlsx');
+    await exportRowsToExcel(templateData, 'Template', 'Supplier_Import_Template.xlsx');
   };
 
-  const handleExcelUpload = (e) => {
+  const handleExcelUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rawData = XLSX.utils.sheet_to_json(sheet);
+    try {
+      const rawData = await readFirstWorksheet(file);
 
-        if (rawData.length === 0) {
-          setError('Excel file is empty');
-          return;
-        }
-
-        const mappedSuppliers = rawData.map((row) => {
-          const findVal = (patterns) => {
-            const key = Object.keys(row).find((k) => 
-              patterns.some((p) => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(p))
-            );
-            return key ? row[key] : '';
-          };
-
-          return {
-            supplierCode: findVal(['suppliercode', 'code', 'number']),
-            supplierName: findVal(['suppliername', 'farmername', 'name']),
-            fatherName: findVal(['fathername', 'fathersname', 'father']),
-            mobile: findVal(['mobile', 'phone', 'mobilenumber', 'contact']),
-            village: findVal(['village', 'city', 'town']),
-            status: findVal(['status']) || 'active',
-            joiningDate: findVal(['joiningdate', 'date', 'joined']),
-          };
-        });
-
-        setLoading(true);
-        setError('');
-        setSuccess('');
-
-        const res = await supplierService.bulkUpload(mappedSuppliers);
-        if (res.success) {
-          let msg = `Successfully uploaded ${res.insertedCount} suppliers.`;
-          if (res.skippedCount > 0) {
-            msg += ` Skipped ${res.skippedCount} duplicates/invalid rows.`;
-          }
-          setSuccess(msg);
-          loadSuppliers();
-        }
-      } catch (err) {
-        setError(err.response?.data?.message || 'Failed to parse or upload Excel file');
-        console.error(err);
-      } finally {
-        setLoading(false);
-        e.target.value = '';
+      if (rawData.length === 0) {
+        setError('Excel file is empty');
+        return;
       }
-    };
-    reader.readAsArrayBuffer(file);
+
+      const mappedSuppliers = rawData.map((row) => {
+        const findVal = (patterns) => {
+          const key = Object.keys(row).find((k) =>
+            patterns.some((p) => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(p))
+          );
+          return key ? row[key] : '';
+        };
+
+        return {
+          supplierCode: findVal(['suppliercode', 'code', 'number']),
+          supplierName: findVal(['suppliername', 'farmername', 'name']),
+          fatherName: findVal(['fathername', 'fathersname', 'father']),
+          mobile: findVal(['mobile', 'phone', 'mobilenumber', 'contact']),
+          village: findVal(['village', 'city', 'town']),
+          status: findVal(['status']) || 'active',
+          joiningDate: findVal(['joiningdate', 'date', 'joined']),
+        };
+      });
+
+      setLoading(true);
+      setError('');
+      setSuccess('');
+
+      const res = await supplierService.bulkUpload(mappedSuppliers);
+      if (res.success) {
+        let msg = `Successfully uploaded ${res.insertedCount} suppliers.`;
+        if (res.skippedCount > 0) {
+          msg += ` Skipped ${res.skippedCount} duplicates/invalid rows.`;
+        }
+        setSuccess(msg);
+        void loadSuppliers();
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to parse or upload Excel file');
+      console.error(err);
+    } finally {
+      setLoading(false);
+      e.target.value = '';
+    }
   };
 
   return (
@@ -333,7 +316,7 @@ const Suppliers = () => {
               <input
                 type="file"
                 id="excel-file-input"
-                accept=".xlsx, .xls"
+                accept=".xlsx"
                 onChange={handleExcelUpload}
                 style={{ display: 'none' }}
               />

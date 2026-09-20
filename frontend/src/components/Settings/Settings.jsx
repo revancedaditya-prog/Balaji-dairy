@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { authService, backupService, auditService } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
@@ -53,7 +53,7 @@ const Settings = ({ setActiveTab }) => {
         setConfirmPassword('');
       }
     } catch (err) {
-      setPassError(err.message || 'Failed to change password');
+      setPassError(err.response?.data?.message || err.message || 'Failed to change password');
     } finally {
       setPassLoading(false);
     }
@@ -72,6 +72,7 @@ const Settings = ({ setActiveTab }) => {
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
       setBackupSuccess('Database backup file downloaded successfully');
     } catch (err) {
       setBackupError('Failed to trigger database export');
@@ -82,7 +83,15 @@ const Settings = ({ setActiveTab }) => {
   };
 
   const handleFileChange = (e) => {
-    setRestoreFile(e.target.files[0]);
+    const file = e.target.files[0];
+    if (file && file.size > 10 * 1024 * 1024) {
+      setRestoreFile(null);
+      setBackupError('Backup file must be 10 MB or smaller');
+      e.target.value = '';
+      return;
+    }
+    setBackupError('');
+    setRestoreFile(file || null);
   };
 
   const handleRestoreUpload = async (e) => {
@@ -100,6 +109,7 @@ const Settings = ({ setActiveTab }) => {
     }
 
     setBackupLoading(true);
+    const restoreForm = e.currentTarget;
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -109,8 +119,8 @@ const Settings = ({ setActiveTab }) => {
         if (res.success) {
           setBackupSuccess(`Database restored successfully: Loaded ${res.stats.suppliers} suppliers, ${res.stats.milkEntries} milk entries.`);
           setRestoreFile(null);
-          e.target.reset();
-          loadLogs(); // Reload audit logs
+          restoreForm.reset();
+          void loadLogs(); // Reload audit logs
         }
       } catch (err) {
         setBackupError(err.response?.data?.message || 'Error occurred during restore: Invalid backup file structure.');
@@ -119,10 +129,19 @@ const Settings = ({ setActiveTab }) => {
         setBackupLoading(false);
       }
     };
+    reader.onerror = () => {
+      setBackupError('The selected backup file could not be read');
+      setBackupLoading(false);
+    };
     reader.readAsText(restoreFile);
   };
 
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
+    if (user?.role !== 'owner') {
+      setLogsLoading(false);
+      return;
+    }
+
     try {
       setLogsLoading(true);
       const res = await auditService.getLogs({ search: logSearch, action: logAction });
@@ -134,14 +153,15 @@ const Settings = ({ setActiveTab }) => {
     } finally {
       setLogsLoading(false);
     }
-  };
+  }, [logAction, logSearch, user?.role]);
 
   useEffect(() => {
+    if (user?.role !== 'owner') return undefined;
     const delayDebounce = setTimeout(() => {
-      loadLogs();
+      void loadLogs();
     }, 400);
     return () => clearTimeout(delayDebounce);
-  }, [logSearch, logAction]);
+  }, [loadLogs, user?.role]);
 
   return (
     <div className="settings-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
@@ -166,12 +186,15 @@ const Settings = ({ setActiveTab }) => {
               <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Role: {user?.role?.toUpperCase()}</span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
             <Button variant="danger" onClick={logout} style={{ flex: 1, minHeight: '38px', fontSize: '0.8rem' }}>Logout Account</Button>
             {user?.role === 'owner' && (
               <Button variant="primary" onClick={() => setActiveTab('users')} style={{ flex: 1, minHeight: '38px', fontSize: '0.8rem' }}>Manage Users</Button>
             )}
-            {user?.role === 'manager' && (
+            {user?.role === 'owner' && (
+              <Button variant="outlined" onClick={() => setActiveTab('rates')} style={{ flex: 1, minHeight: '38px', fontSize: '0.8rem' }}>Rate Chart</Button>
+            )}
+            {['owner', 'manager'].includes(user?.role) && (
               <Button variant="primary" onClick={() => setActiveTab('payments')} style={{ flex: 1, minHeight: '38px', fontSize: '0.8rem' }}>Go to Payments</Button>
             )}
           </div>
@@ -360,7 +383,7 @@ const Settings = ({ setActiveTab }) => {
       <div className="grid grid-cols-3 desktop-only" style={{ gap: '1rem', alignItems: 'start' }}>
         
         {/* Settings forms on left side */}
-        <div style={{ gridColumn: 'span 1' }} className="grid" style={{ gap: '1rem' }}>
+        <div className="grid" style={{ gridColumn: 'span 1', gap: '1rem' }}>
           
           {/* Security */}
           <Card>

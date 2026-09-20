@@ -5,13 +5,23 @@ const RateChart = require('../models/RateChart');
 const Payment = require('../models/Payment');
 const AuditLog = require('../models/AuditLog');
 const logAudit = require('../utils/auditLogger');
+const mongoose = require('mongoose');
+const { sendControllerError } = require('../utils/http');
+
+const COLLECTION_NAMES = ['users', 'suppliers', 'milkEntries', 'rateCharts', 'payments', 'auditLogs'];
+
+const validateCollections = (collections) => {
+  if (!collections || typeof collections !== 'object' || Array.isArray(collections)) return false;
+  return COLLECTION_NAMES.every((name) => collections[name] === undefined || Array.isArray(collections[name]));
+};
 
 // @desc    Export a backup of the database
 // @route   GET /api/backup/export
 // @access  Private
 exports.exportBackup = async (req, res) => {
   try {
-    const users = await User.find({});
+    // Password hashes are required to restore accounts. This endpoint is owner-only.
+    const users = await User.find({}).select('+password');
     const suppliers = await Supplier.find({});
     const milkEntries = await MilkEntry.find({});
     const rateCharts = await RateChart.find({});
@@ -19,7 +29,7 @@ exports.exportBackup = async (req, res) => {
     const auditLogs = await AuditLog.find({});
 
     const backupData = {
-      backupVersion: '1.0',
+      backupVersion: '1.1',
       timestamp: new Date().toISOString(),
       collections: {
         users,
@@ -31,11 +41,12 @@ exports.exportBackup = async (req, res) => {
       },
     };
 
-    res.setHeader('Content-disposition', `attachment; filename=balaji_dairy_backup_${Date.now()}.json`);
-    res.setHeader('Content-type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename=balaji_dairy_backup_${Date.now()}.json`);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
     res.status(200).send(JSON.stringify(backupData, null, 2));
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -46,51 +57,38 @@ exports.restoreBackup = async (req, res) => {
   try {
     const { collections } = req.body;
 
-    if (!collections) {
-      return res.status(400).json({ success: false, message: 'Invalid backup structure. Collections key missing.' });
+    if (!validateCollections(collections)) {
+      return res.status(400).json({ success: false, message: 'Invalid backup structure. Collection values must be arrays.' });
     }
 
     const { users, suppliers, milkEntries, rateCharts, payments, auditLogs } = collections;
 
-    // 1. Wipe current collections (except we preserve the active logging user to avoid locking ourselves out!)
     const activeUserId = req.user._id;
-    const activeUser = await User.findById(activeUserId);
+    const insertUsers = (users || []).filter((user) =>
+      user?._id?.toString() !== activeUserId.toString() && typeof user?.password === 'string'
+    );
+    const skippedUsers = (users || []).length - insertUsers.length;
+    const session = await mongoose.startSession();
 
-    // Perform deletions
-    await User.deleteMany({ _id: { $ne: activeUserId } });
-    await Supplier.deleteMany({});
-    await MilkEntry.deleteMany({});
-    await RateChart.deleteMany({});
-    await Payment.deleteMany({});
-    await AuditLog.deleteMany({});
+    try {
+      await session.withTransaction(async () => {
+        // Preserve the active owner so a restore can never lock out the current session.
+        await User.deleteMany({ _id: { $ne: activeUserId } }, { session });
+        await Supplier.deleteMany({}, { session });
+        await MilkEntry.deleteMany({}, { session });
+        await RateChart.deleteMany({}, { session });
+        await Payment.deleteMany({}, { session });
+        await AuditLog.deleteMany({}, { session });
 
-    // 2. Perform insertions
-    if (users && users.length > 0) {
-      // Filter out the active logging user if present in the backup list to avoid duplicate key error
-      const insertUsers = users.filter((u) => u._id.toString() !== activeUserId.toString());
-      if (insertUsers.length > 0) {
-        await User.insertMany(insertUsers);
-      }
-    }
-
-    if (suppliers && suppliers.length > 0) {
-      await Supplier.insertMany(suppliers);
-    }
-
-    if (milkEntries && milkEntries.length > 0) {
-      await MilkEntry.insertMany(milkEntries);
-    }
-
-    if (rateCharts && rateCharts.length > 0) {
-      await RateChart.insertMany(rateCharts);
-    }
-
-    if (payments && payments.length > 0) {
-      await Payment.insertMany(payments);
-    }
-
-    if (auditLogs && auditLogs.length > 0) {
-      await AuditLog.insertMany(auditLogs);
+        if (insertUsers.length > 0) await User.insertMany(insertUsers, { session });
+        if (suppliers?.length > 0) await Supplier.insertMany(suppliers, { session });
+        if (milkEntries?.length > 0) await MilkEntry.insertMany(milkEntries, { session });
+        if (rateCharts?.length > 0) await RateChart.insertMany(rateCharts, { session });
+        if (payments?.length > 0) await Payment.insertMany(payments, { session });
+        if (auditLogs?.length > 0) await AuditLog.insertMany(auditLogs, { session });
+      });
+    } finally {
+      await session.endSession();
     }
 
     // Record audit of backup restore
@@ -110,9 +108,10 @@ exports.restoreBackup = async (req, res) => {
         rateCharts: (rateCharts || []).length,
         payments: (payments || []).length,
         auditLogs: (auditLogs || []).length,
+        skippedUsers,
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };

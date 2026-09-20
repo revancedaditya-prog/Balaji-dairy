@@ -2,15 +2,13 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   if (!process.env.MONGODB_URI) {
-    console.error('❌ Database Connection Error: MONGODB_URI is not defined in environment variables.');
-    process.exit(1);
+    throw new Error('MONGODB_URI is not defined in environment variables');
   }
 
   // Safety guard: Prevent connecting to localhost/127.0.0.1 in production
   if (process.env.NODE_ENV === 'production' && 
      (process.env.MONGODB_URI.includes('localhost') || process.env.MONGODB_URI.includes('127.0.0.1'))) {
-    console.error('❌ Database Connection Error: Cannot connect to localhost/127.0.0.1 database in production mode.');
-    process.exit(1);
+    throw new Error('Cannot connect to localhost/127.0.0.1 database in production mode');
   }
 
   const options = {
@@ -36,8 +34,7 @@ const connectDB = async () => {
       console.log('MongoDB reconnected to Atlas.');
     });
   } catch (error) {
-    console.error(`Database Connection Error: ${error.message}`);
-    process.exit(1);
+    throw new Error(`Database Connection Error: ${error.message}`, { cause: error });
   }
 };
 

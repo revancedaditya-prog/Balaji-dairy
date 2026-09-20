@@ -2,14 +2,9 @@ const Payment = require('../models/Payment');
 const MilkEntry = require('../models/MilkEntry');
 const Supplier = require('../models/Supplier');
 const logAudit = require('../utils/auditLogger');
-
-// Helper to get current Indian standard date
-const getISTDate = () => {
-  const dateObj = new Date();
-  const offset = 5.5 * 60 * 60 * 1000;
-  const istDate = new Date(dateObj.getTime() + offset);
-  return istDate.toISOString().split('T')[0];
-};
+const { getISTDate, getISTDateTime } = require('../utils/dateTime');
+const { isIsoDate, safeRegex, toPositiveInteger, toPositiveNumber } = require('../utils/validation');
+const { sendControllerError } = require('../utils/http');
 
 // @desc    Record a new payment
 // @route   POST /api/payments
@@ -18,23 +13,32 @@ exports.recordPayment = async (req, res) => {
   const { supplierCode, amountPaid, paymentMode, remarks, date } = req.body;
 
   try {
-    if (!supplierCode || !amountPaid) {
+    const parsedSupplierCode = toPositiveInteger(supplierCode);
+    const parsedAmount = toPositiveNumber(amountPaid);
+    if (!parsedSupplierCode || !parsedAmount) {
       return res.status(400).json({ success: false, message: 'Please provide supplierCode and amountPaid' });
     }
 
     // Verify supplier exists
-    const supplier = await Supplier.findOne({ supplierCode });
+    const supplier = await Supplier.findOne({ supplierCode: parsedSupplierCode });
     if (!supplier) {
       return res.status(404).json({ success: false, message: `Supplier Code #${supplierCode} does not exist` });
     }
 
     const payDate = date || getISTDate();
+    if (!isIsoDate(payDate)) {
+      return res.status(400).json({ success: false, message: 'Payment date must be a valid YYYY-MM-DD date' });
+    }
+    const resolvedPaymentMode = paymentMode || 'Cash';
+    if (!['Cash', 'Bank Transfer', 'Cheque'].includes(resolvedPaymentMode)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment mode' });
+    }
 
     const payment = await Payment.create({
-      supplierCode,
+      supplierCode: parsedSupplierCode,
       date: payDate,
-      amountPaid,
-      paymentMode: paymentMode || 'Cash',
+      amountPaid: parsedAmount,
+      paymentMode: resolvedPaymentMode,
       remarks,
       createdBy: req.user._id,
     });
@@ -42,14 +46,14 @@ exports.recordPayment = async (req, res) => {
     await logAudit(
       `${req.user.name} (${req.user.phone})`,
       'PAYMENT_RECORD',
-      `Payment recorded for Supplier #${supplierCode} of amount Rs. ${amountPaid}`,
+      `Payment recorded for Supplier #${parsedSupplierCode} of amount Rs. ${parsedAmount}`,
       null,
       payment
     );
 
     res.status(201).json({ success: true, data: payment });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -63,10 +67,20 @@ exports.getPayments = async (req, res) => {
     let query = {};
 
     if (supplierCode) {
-      query.supplierCode = parseInt(supplierCode, 10);
+      const parsedSupplierCode = toPositiveInteger(supplierCode);
+      if (!parsedSupplierCode) {
+        return res.status(400).json({ success: false, message: 'Supplier code must be a positive integer' });
+      }
+      query.supplierCode = parsedSupplierCode;
     }
 
     if (startDate || endDate) {
+      if ((startDate && !isIsoDate(startDate)) || (endDate && !isIsoDate(endDate))) {
+        return res.status(400).json({ success: false, message: 'Date filters must use a valid YYYY-MM-DD date' });
+      }
+      if (startDate && endDate && startDate > endDate) {
+        return res.status(400).json({ success: false, message: 'Start date cannot be after end date' });
+      }
       query.date = {};
       if (startDate) query.date.$gte = startDate;
       if (endDate) query.date.$lte = endDate;
@@ -75,7 +89,7 @@ exports.getPayments = async (req, res) => {
     const payments = await Payment.find(query).sort({ date: -1, createdAt: -1 });
     res.status(200).json({ success: true, count: payments.length, data: payments });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -89,16 +103,16 @@ exports.getLedger = async (req, res) => {
     // 1. Fetch suppliers matching search filters
     let supplierQuery = {};
     if (village) {
-      supplierQuery.village = new RegExp(village, 'i');
+      supplierQuery.village = safeRegex(village);
     }
     if (search) {
-      const searchNum = parseInt(search);
-      if (!isNaN(searchNum)) {
+      const searchNum = toPositiveInteger(search);
+      if (searchNum) {
         supplierQuery.$or = [{ supplierCode: searchNum }];
       } else {
         supplierQuery.$or = [
-          { supplierName: new RegExp(search, 'i') },
-          { village: new RegExp(search, 'i') },
+          { supplierName: safeRegex(search) },
+          { village: safeRegex(search) },
         ];
       }
     }
@@ -167,7 +181,7 @@ exports.getLedger = async (req, res) => {
 
     res.status(200).json({ success: true, count: ledger.length, data: ledger });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -175,9 +189,11 @@ exports.getLedger = async (req, res) => {
 // @route   GET /api/payments/ledger/:code
 // @access  Private
 exports.getSupplierLedger = async (req, res) => {
-  const code = parseInt(req.params.code, 10);
-
   try {
+    const code = toPositiveInteger(req.params.code);
+    if (!code) {
+      return res.status(400).json({ success: false, message: 'Supplier code must be a positive integer' });
+    }
     const supplier = await Supplier.findOne({ supplierCode: code });
     if (!supplier) {
       return res.status(404).json({ success: false, message: 'Supplier not found' });
@@ -189,12 +205,10 @@ exports.getSupplierLedger = async (req, res) => {
 
     // Combine them chronologically into a running ledger
     // A ledger item can be either a Debit (milk collection, center owes supplier) or a Credit (payment made, center paid supplier)
-    let runningBalance = 0;
     const ledgerHistory = [];
 
     // Map milk entries
     milkEntries.forEach((entry) => {
-      runningBalance += entry.amount;
       ledgerHistory.push({
         id: entry._id,
         date: entry.date,
@@ -203,27 +217,28 @@ exports.getSupplierLedger = async (req, res) => {
         description: `Qty: ${entry.milkQuantity}L | Fat: ${entry.fat}% | SNF: ${entry.snf}%`,
         amount: entry.amount,
         txnType: 'debit', // Center owes supplier
-        balance: Math.round(runningBalance * 100) / 100,
       });
     });
 
     // Map payments
     payments.forEach((pay) => {
-      runningBalance -= pay.amountPaid;
       ledgerHistory.push({
         id: pay._id,
         date: pay.date,
-        time: pay.createdAt.toISOString().substring(11, 19),
+        time: getISTDateTime(pay.createdAt).timeStr,
         type: 'Payment',
         description: `Paid via ${pay.paymentMode}${pay.remarks ? ' - ' + pay.remarks : ''}`,
         amount: pay.amountPaid,
         txnType: 'credit', // Paid to supplier
-        balance: Math.round(runningBalance * 100) / 100,
       });
     });
 
     // Sort combined by date
-    ledgerHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+    ledgerHistory.sort((a, b) => {
+      const left = `${a.date}T${a.time || '00:00:00'}`;
+      const right = `${b.date}T${b.time || '00:00:00'}`;
+      return left.localeCompare(right);
+    });
 
     // Recalculate balance dynamically after chronological sorting
     let bal = 0;
@@ -259,6 +274,6 @@ exports.getSupplierLedger = async (req, res) => {
       history: sortedHistory.reverse(), // Show latest first in UI table
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };

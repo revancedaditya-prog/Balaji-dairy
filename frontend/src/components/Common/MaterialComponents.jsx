@@ -1,5 +1,3 @@
-import React from 'react';
-
 // MD3 Card Component
 export const Card = ({ children, className = '', style = {}, onClick }) => (
   <div 
@@ -19,7 +17,8 @@ export const Button = ({
   type = 'button', 
   disabled = false,
   className = '', 
-  style = {} 
+  style = {},
+  ...buttonProps
 }) => {
   const getVariantClass = () => {
     switch (variant) {
@@ -37,6 +36,7 @@ export const Button = ({
       disabled={disabled}
       className={`btn-md3 ${getVariantClass()} ${className}`}
       style={style}
+      {...buttonProps}
     >
       {children}
     </button>
@@ -46,38 +46,25 @@ export const Button = ({
 // MD3 Outlined Text Field
 export const Input = ({
   label,
-  type = 'text',
-  value,
-  onChange,
-  placeholder = '',
-  required = false,
-  disabled = false,
-  name,
-  inputMode, // e.g. decimal, numeric
-  step,
-  min,
-  onBlur,
+  id,
   className = '',
-  style = {}
-}) => (
-  <div className={`input-md3-group ${className}`} style={style}>
-    {label && <label className="input-md3-label">{label}</label>}
-    <input
-      type={type}
-      name={name}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      required={required}
-      disabled={disabled}
-      inputMode={inputMode}
-      step={step}
-      min={min}
-      onBlur={onBlur}
-      className="input-md3-control keyboard-safe-input"
-    />
-  </div>
-);
+  style = {},
+  ...inputProps
+}) => {
+  const generatedId = useId();
+  const inputId = id || generatedId;
+
+  return (
+    <div className={`input-md3-group ${className}`} style={style}>
+      {label && <label className="input-md3-label" htmlFor={inputId}>{label}</label>}
+      <input
+        id={inputId}
+        className="input-md3-control keyboard-safe-input"
+        {...inputProps}
+      />
+    </div>
+  );
+};
 
 // MD3 Badge Component
 export const Badge = ({ children, type = 'neutral', className = '' }) => {
@@ -105,14 +92,36 @@ export const Badge = ({ children, type = 'neutral', className = '' }) => {
 
 // MD3 Modal / Bottom Sheet Component
 export const Modal = ({ isOpen, onClose, title, children, footerActions }) => {
+  const titleId = useId();
+  const closeButtonRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    closeButtonRef.current?.focus();
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onClick={(event) => {
+        if (event.currentTarget === event.target) onClose();
+      }}
+    >
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>{title}</h2>
-          <button className="btn-close" onClick={onClose} aria-label="Close dialog">&times;</button>
+          <h2 id={titleId}>{title}</h2>
+          <button ref={closeButtonRef} type="button" className="btn-close" onClick={onClose} aria-label="Close dialog">&times;</button>
         </div>
         <div className="modal-body">
           {children}
@@ -190,3 +199,4 @@ export const Loading = ({ label = 'Loading...' }) => (
     {label && <span style={{ fontSize: '0.875rem', fontWeight: '500' }}>{label}</span>}
   </div>
 );
+import { useEffect, useId, useRef } from 'react';

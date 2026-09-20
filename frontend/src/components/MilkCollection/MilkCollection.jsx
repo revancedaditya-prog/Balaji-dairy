@@ -1,9 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { milkEntryService, supplierService } from '../../services/api';
-import * as XLSX from 'xlsx';
 import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
+import { detectMilkShift, getISTDate, getISTDateTime } from '../../utils/dateTime';
+import { exportRowsToExcel } from '../../utils/excel';
+import { escapeHtml, printHtml } from '../../utils/html';
+import { useAuth } from '../../context/AuthContext';
 
 const MilkCollection = () => {
+  const { user } = useAuth();
+  const canCorrectEntries = ['owner', 'manager'].includes(user?.role);
   // Form State
   const [supplierCode, setSupplierCode] = useState('');
   const [supplierName, setSupplierName] = useState('');
@@ -13,33 +18,15 @@ const MilkCollection = () => {
   const [amount, setAmount] = useState('');
   const [remarks, setRemarks] = useState('');
 
-  // Time & Shift Detect
-  const getISTDateTime = () => {
-    const d = new Date();
-    // UTC offset for IST is +5.5 hours
-    const localTime = d.getTime() + (d.getTimezoneOffset() * 60000);
-    const istTime = new Date(localTime + (3600000 * 5.5));
-    
-    const dateStr = istTime.toISOString().split('T')[0];
-    const timeStr = istTime.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
-    return { dateStr, timeStr };
-  };
-
-  const detectShift = (timeString) => {
-    const hour = parseInt(timeString.split(':')[0], 10);
-    // Morning shift is typically before 2 PM (14:00)
-    return hour < 14 ? 'Morning' : 'Evening';
-  };
-
   const initDateTime = getISTDateTime();
   const [entryDate, setEntryDate] = useState(initDateTime.dateStr);
   const [entryTime, setEntryTime] = useState(initDateTime.timeStr);
-  const [shift, setShift] = useState(detectShift(initDateTime.timeStr));
+  const [shift, setShift] = useState(detectMilkShift(initDateTime.timeStr));
   const [customDateTime, setCustomDateTime] = useState(false);
 
   // Filters State
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(getISTDate);
+  const [endDate, setEndDate] = useState(getISTDate);
   const [filterShift, setFilterShift] = useState('');
   const [filterCode, setFilterCode] = useState('');
   const [filterName, setFilterName] = useState('');
@@ -92,13 +79,13 @@ const MilkCollection = () => {
         const ist = getISTDateTime();
         setEntryDate(ist.dateStr);
         setEntryTime(ist.timeStr);
-        setShift(detectShift(ist.timeStr));
+        setShift(detectMilkShift(ist.timeStr));
       }, 30000); // Check every 30s
       return () => clearInterval(timer);
     }
   }, [customDateTime]);
 
-  const loadEntries = async () => {
+  const loadEntries = useCallback(async () => {
     try {
       setLoadingList(true);
       const filters = {
@@ -118,11 +105,11 @@ const MilkCollection = () => {
     } finally {
       setLoadingList(false);
     }
-  };
+  }, [endDate, filterCode, filterName, filterShift, filterVillage, startDate]);
 
   useEffect(() => {
-    loadEntries();
-  }, [startDate, endDate, filterCode, filterName, filterShift, filterVillage]);
+    void loadEntries();
+  }, [loadEntries]);
 
   // Submit milk collection entry
   const handleSubmitEntry = async (e) => {
@@ -164,7 +151,8 @@ const MilkCollection = () => {
     }
   };
 
-  const handleDeleteEntry = async (id, code) => {
+  const handleDeleteEntry = async (id) => {
+    if (!canCorrectEntries) return;
     if (!window.confirm('Delete this milk collection entry record?')) {
       return;
     }
@@ -179,7 +167,7 @@ const MilkCollection = () => {
   };
 
   // Excel Export
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     const formattedData = entries.map((e) => ({
       'Supplier Code': e.supplierCode,
       'Supplier Name': e.supplierName,
@@ -193,10 +181,7 @@ const MilkCollection = () => {
       'Remarks': e.remarks || '-'
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(formattedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Milk_Entries');
-    XLSX.writeFile(workbook, `Milk_Collection_${startDate}_to_${endDate}.xlsx`);
+    await exportRowsToExcel(formattedData, 'Milk Entries', `Milk_Collection_${startDate}_to_${endDate}.xlsx`);
   };
 
   // PDF Export
@@ -221,7 +206,7 @@ const MilkCollection = () => {
         </head>
         <body>
           <h2>BALAJI DAIRY COLLECTION CENTER</h2>
-          <h4>COLLECTION STATEMENT (${startDate} to ${endDate})</h4>
+          <h4>COLLECTION STATEMENT (${escapeHtml(startDate)} to ${escapeHtml(endDate)})</h4>
           <table>
             <thead>
               <tr>
@@ -238,14 +223,14 @@ const MilkCollection = () => {
             <tbody>
               ${entries.map(e => `
                 <tr>
-                  <td><b>#${e.supplierCode}</b></td>
-                  <td>${e.supplierName}</td>
-                  <td>${e.date}</td>
-                  <td>${e.shift}</td>
-                  <td>${e.milkQuantity} L</td>
-                  <td>${e.fat}%</td>
-                  <td>${e.snf}%</td>
-                  <td>₹${e.amount}</td>
+                  <td><b>#${escapeHtml(e.supplierCode)}</b></td>
+                  <td>${escapeHtml(e.supplierName)}</td>
+                  <td>${escapeHtml(e.date)}</td>
+                  <td>${escapeHtml(e.shift)}</td>
+                  <td>${escapeHtml(e.milkQuantity)} L</td>
+                  <td>${escapeHtml(e.fat)}%</td>
+                  <td>${escapeHtml(e.snf)}%</td>
+                  <td>₹${escapeHtml(e.amount)}</td>
                 </tr>
               `).join('')}
               <tr class="total-row">
@@ -260,12 +245,7 @@ const MilkCollection = () => {
       </html>
     `;
 
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
+    printHtml(printContent);
   };
 
   return (
@@ -358,6 +338,7 @@ const MilkCollection = () => {
                   type="number"
                   inputMode="decimal"
                   step="0.01"
+                  min="0.01"
                   placeholder="e.g. 10.5"
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
@@ -369,6 +350,7 @@ const MilkCollection = () => {
                   type="number"
                   inputMode="decimal"
                   step="0.01"
+                  min="0.01"
                   placeholder="e.g. 500"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -383,6 +365,7 @@ const MilkCollection = () => {
                   type="number"
                   inputMode="decimal"
                   step="0.1"
+                  min="0"
                   placeholder="e.g. 4.5"
                   value={fat}
                   onChange={(e) => setFat(e.target.value)}
@@ -393,6 +376,7 @@ const MilkCollection = () => {
                   type="number"
                   inputMode="decimal"
                   step="0.1"
+                  min="0"
                   placeholder="e.g. 8.5"
                   value={snf}
                   onChange={(e) => setSnf(e.target.value)}
@@ -474,7 +458,7 @@ const MilkCollection = () => {
                       <th>Qty</th>
                       <th>FAT/SNF</th>
                       <th>Amount</th>
-                      <th style={{ textAlign: 'right' }}>Action</th>
+                      {canCorrectEntries && <th style={{ textAlign: 'right' }}>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -501,20 +485,20 @@ const MilkCollection = () => {
                           <td>{e.milkQuantity} L</td>
                           <td>{e.fat}% / {e.snf}%</td>
                           <td style={{ fontWeight: '600' }}>₹{e.amount}</td>
-                          <td style={{ textAlign: 'right' }}>
+                          {canCorrectEntries && <td style={{ textAlign: 'right' }}>
                             <Button
                               variant="danger"
                               style={{ padding: '0.2rem 0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
-                              onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
+                              onClick={() => handleDeleteEntry(e._id)}
                             >
                               Delete
                             </Button>
-                          </td>
+                          </td>}
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
+                        <td colSpan={canCorrectEntries ? 7 : 6} style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
                           No milk collection records match the filter query.
                         </td>
                       </tr>
@@ -555,15 +539,15 @@ const MilkCollection = () => {
                         <span style={{ fontWeight: '700', color: 'var(--md-sys-color-primary)', fontSize: '0.95rem' }}>₹{e.amount}</span>
                       </div>
                     </div>
-                    <div className="mobile-row-card-actions">
+                    {canCorrectEntries && <div className="mobile-row-card-actions">
                       <Button
                         variant="danger"
                         style={{ padding: '0.2rem 0.5rem', minHeight: '36px', fontSize: '0.8rem' }}
-                        onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
+                        onClick={() => handleDeleteEntry(e._id)}
                       >
                         Delete Entry
                       </Button>
-                    </div>
+                    </div>}
                   </div>
                 ))
               ) : (

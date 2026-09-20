@@ -1,5 +1,20 @@
 const Supplier = require('../models/Supplier');
+const MilkEntry = require('../models/MilkEntry');
+const Payment = require('../models/Payment');
 const logAudit = require('../utils/auditLogger');
+const {
+  isIsoDate,
+  normalizePhone,
+  safeRegex,
+  toPositiveInteger,
+} = require('../utils/validation');
+const { sendControllerError } = require('../utils/http');
+
+const SUPPLIER_STATUSES = ['active', 'inactive'];
+const parseOptionalPhone = (value) => {
+  if (value === undefined || value === null || String(value).trim() === '') return '';
+  return normalizePhone(value);
+};
 
 // @desc    Add a new supplier
 // @route   POST /api/suppliers
@@ -16,33 +31,48 @@ exports.addSupplier = async (req, res) => {
   } = req.body;
 
   try {
+    const parsedSupplierCode = toPositiveInteger(supplierCode);
+    if (!parsedSupplierCode || !supplierName?.trim() || !village?.trim()) {
+      return res.status(400).json({ success: false, message: 'Valid supplier code, name and village are required' });
+    }
+    if (status !== undefined && !SUPPLIER_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Status must be active or inactive' });
+    }
+    if (joiningDate && !isIsoDate(joiningDate)) {
+      return res.status(400).json({ success: false, message: 'Joining date must be a valid YYYY-MM-DD date' });
+    }
+    const normalizedMobile = parseOptionalPhone(mobile);
+    if (normalizedMobile === null) {
+      return res.status(400).json({ success: false, message: 'Mobile number must contain 7 to 15 digits' });
+    }
+
     // Check if supplierCode already exists
-    const existing = await Supplier.findOne({ supplierCode });
+    const existing = await Supplier.findOne({ supplierCode: parsedSupplierCode });
     if (existing) {
       return res.status(400).json({ success: false, message: `Supplier Code #${supplierCode} is already registered` });
     }
 
     const supplier = await Supplier.create({
-      supplierCode,
-      supplierName,
-      fatherName,
-      mobile,
-      village,
+      supplierCode: parsedSupplierCode,
+      supplierName: supplierName.trim(),
+      fatherName: fatherName ? String(fatherName).trim() : '',
+      mobile: normalizedMobile,
+      village: village.trim(),
       status,
-      joiningDate: joiningDate || new Date(),
+      joiningDate: joiningDate ? new Date(`${joiningDate}T00:00:00.000Z`) : new Date(),
     });
 
     await logAudit(
       `${req.user.name} (${req.user.phone})`,
       'SUPPLIER_ADD',
-      `Supplier Code #${supplierCode}`,
+      `Supplier Code #${parsedSupplierCode}`,
       null,
       supplier
     );
 
     res.status(201).json({ success: true, data: supplier });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -57,23 +87,26 @@ exports.getSuppliers = async (req, res) => {
 
     // Filter by status if provided
     if (status) {
+      if (!SUPPLIER_STATUSES.includes(status)) {
+        return res.status(400).json({ success: false, message: 'Status must be active or inactive' });
+      }
       query.status = status;
     }
 
     // Filter by village if provided
     if (village) {
-      query.village = new RegExp(village, 'i');
+      query.village = safeRegex(village);
     }
 
     // Search query matching supplierCode or supplierName or village
     if (search) {
-      const searchNum = parseInt(search);
-      if (!isNaN(searchNum)) {
+      const searchNum = toPositiveInteger(search);
+      if (searchNum) {
         query.$or = [{ supplierCode: searchNum }];
       } else {
         query.$or = [
-          { supplierName: new RegExp(search, 'i') },
-          { village: new RegExp(search, 'i') },
+          { supplierName: safeRegex(search) },
+          { village: safeRegex(search) },
         ];
       }
     }
@@ -81,7 +114,7 @@ exports.getSuppliers = async (req, res) => {
     const suppliers = await Supplier.find(query).sort({ supplierCode: 1 });
     res.status(200).json({ success: true, count: suppliers.length, data: suppliers });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -96,7 +129,7 @@ exports.getSupplierById = async (req, res) => {
     }
     res.status(200).json({ success: true, data: supplier });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -105,13 +138,17 @@ exports.getSupplierById = async (req, res) => {
 // @access  Private
 exports.getSupplierByCode = async (req, res) => {
   try {
-    const supplier = await Supplier.findOne({ supplierCode: req.params.code });
+    const supplierCode = toPositiveInteger(req.params.code);
+    if (!supplierCode) {
+      return res.status(400).json({ success: false, message: 'Supplier code must be a positive integer' });
+    }
+    const supplier = await Supplier.findOne({ supplierCode });
     if (!supplier) {
       return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
     res.status(200).json({ success: true, data: supplier });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -129,17 +166,68 @@ exports.updateSupplier = async (req, res) => {
     // Capture old value for audit trail
     const oldValue = supplier.toObject();
 
-    // Check if supplierCode is updated and already exists
-    if (req.body.supplierCode && req.body.supplierCode !== supplier.supplierCode) {
-      const existing = await Supplier.findOne({ supplierCode: req.body.supplierCode });
-      if (existing) {
-        return res.status(400).json({ success: false, message: `Supplier Code #${req.body.supplierCode} is already registered` });
+    // Normalize the numeric code before comparing it with the stored number.
+    if (req.body.supplierCode !== undefined) {
+      const parsedSupplierCode = toPositiveInteger(req.body.supplierCode);
+      if (!parsedSupplierCode) {
+        return res.status(400).json({ success: false, message: 'Supplier code must be a positive integer' });
       }
+
+      const existing = await Supplier.findOne({
+        supplierCode: parsedSupplierCode,
+        _id: { $ne: supplier._id },
+      });
+      if (existing) {
+        return res.status(400).json({ success: false, message: `Supplier Code #${parsedSupplierCode} is already registered` });
+      }
+
+      if (parsedSupplierCode !== supplier.supplierCode) {
+        const [hasMilkEntries, hasPayments] = await Promise.all([
+          MilkEntry.exists({ supplierCode: supplier.supplierCode }),
+          Payment.exists({ supplierCode: supplier.supplierCode }),
+        ]);
+        if (hasMilkEntries || hasPayments) {
+          return res.status(409).json({
+            success: false,
+            message: 'Supplier code cannot be changed after financial entries exist. Update the name or status instead.',
+          });
+        }
+      }
+      req.body.supplierCode = parsedSupplierCode;
+    }
+
+    const allowedUpdates = ['supplierCode', 'supplierName', 'fatherName', 'mobile', 'village', 'status', 'joiningDate'];
+    const updates = Object.fromEntries(
+      Object.entries(req.body).filter(([key]) => allowedUpdates.includes(key))
+    );
+    if (updates.supplierName !== undefined) {
+      updates.supplierName = String(updates.supplierName).trim();
+      if (!updates.supplierName) return res.status(400).json({ success: false, message: 'Supplier name cannot be empty' });
+    }
+    if (updates.village !== undefined) {
+      updates.village = String(updates.village).trim();
+      if (!updates.village) return res.status(400).json({ success: false, message: 'Village cannot be empty' });
+    }
+    if (updates.fatherName !== undefined) updates.fatherName = String(updates.fatherName).trim();
+    if (updates.mobile !== undefined) {
+      updates.mobile = parseOptionalPhone(updates.mobile);
+      if (updates.mobile === null) {
+        return res.status(400).json({ success: false, message: 'Mobile number must contain 7 to 15 digits' });
+      }
+    }
+    if (updates.status !== undefined && !SUPPLIER_STATUSES.includes(updates.status)) {
+      return res.status(400).json({ success: false, message: 'Status must be active or inactive' });
+    }
+    if (updates.joiningDate !== undefined) {
+      if (!isIsoDate(updates.joiningDate)) {
+        return res.status(400).json({ success: false, message: 'Joining date must be a valid YYYY-MM-DD date' });
+      }
+      updates.joiningDate = new Date(`${updates.joiningDate}T00:00:00.000Z`);
     }
 
     const updatedSupplier = await Supplier.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updates,
       { new: true, runValidators: true }
     );
 
@@ -153,7 +241,7 @@ exports.updateSupplier = async (req, res) => {
 
     res.status(200).json({ success: true, data: updatedSupplier });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -170,6 +258,17 @@ exports.deleteSupplier = async (req, res) => {
 
     const oldValue = supplier.toObject();
 
+    const [hasMilkEntries, hasPayments] = await Promise.all([
+      MilkEntry.exists({ supplierCode: supplier.supplierCode }),
+      Payment.exists({ supplierCode: supplier.supplierCode }),
+    ]);
+    if (hasMilkEntries || hasPayments) {
+      return res.status(409).json({
+        success: false,
+        message: 'Supplier has financial history and cannot be deleted. Mark the supplier inactive instead.',
+      });
+    }
+
     await supplier.deleteOne();
 
     await logAudit(
@@ -182,7 +281,7 @@ exports.deleteSupplier = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Supplier deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -193,11 +292,14 @@ exports.bulkUploadSuppliers = async (req, res) => {
   const { suppliers } = req.body;
 
   try {
-    if (!suppliers || !Array.isArray(suppliers)) {
+    if (!Array.isArray(suppliers) || suppliers.length === 0) {
       return res.status(400).json({ success: false, message: 'Please provide a valid array of suppliers' });
     }
+    if (suppliers.length > 500) {
+      return res.status(413).json({ success: false, message: 'A maximum of 500 suppliers can be uploaded at once' });
+    }
 
-    const supplierCodes = suppliers.map((s) => parseInt(s.supplierCode, 10)).filter((code) => !isNaN(code));
+    const supplierCodes = suppliers.map((s) => toPositiveInteger(s.supplierCode)).filter(Boolean);
     
     // Check for existing supplier codes in DB
     const existingSuppliers = await Supplier.find({ supplierCode: { $in: supplierCodes } });
@@ -207,8 +309,8 @@ exports.bulkUploadSuppliers = async (req, res) => {
     const skipped = [];
 
     for (const s of suppliers) {
-      const code = parseInt(s.supplierCode, 10);
-      if (isNaN(code)) {
+      const code = toPositiveInteger(s.supplierCode);
+      if (!code) {
         skipped.push({ supplier: s, reason: 'Invalid or missing Supplier Code' });
         continue;
       }
@@ -220,15 +322,28 @@ exports.bulkUploadSuppliers = async (req, res) => {
         skipped.push({ supplier: s, reason: 'Missing required field (Name or Village)' });
         continue;
       }
+      if (s.status && !SUPPLIER_STATUSES.includes(s.status)) {
+        skipped.push({ supplier: s, reason: 'Status must be active or inactive' });
+        continue;
+      }
+      if (s.joiningDate && !isIsoDate(s.joiningDate)) {
+        skipped.push({ supplier: s, reason: 'Joining Date must use a valid YYYY-MM-DD date' });
+        continue;
+      }
+      const normalizedMobile = parseOptionalPhone(s.mobile);
+      if (normalizedMobile === null) {
+        skipped.push({ supplier: s, reason: 'Mobile number must contain 7 to 15 digits' });
+        continue;
+      }
 
       toInsert.push({
         supplierCode: code,
         supplierName: s.supplierName.trim(),
         fatherName: s.fatherName ? s.fatherName.trim() : '',
-        mobile: s.mobile ? s.mobile.toString().trim() : '',
+        mobile: normalizedMobile,
         village: s.village.trim(),
         status: s.status === 'inactive' ? 'inactive' : 'active',
-        joiningDate: s.joiningDate && !isNaN(Date.parse(s.joiningDate)) ? new Date(s.joiningDate) : new Date(),
+        joiningDate: s.joiningDate ? new Date(`${s.joiningDate}T00:00:00.000Z`) : new Date(),
       });
 
       // Avoid inserting duplicates that are in the same payload
@@ -251,6 +366,6 @@ exports.bulkUploadSuppliers = async (req, res) => {
       skipped,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };

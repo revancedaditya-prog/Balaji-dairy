@@ -1,5 +1,20 @@
 const User = require('../models/User');
 const logAudit = require('../utils/auditLogger');
+const { normalizePhone } = require('../utils/validation');
+const { sendControllerError } = require('../utils/http');
+
+const VALID_ROLES = new Set(['owner', 'manager', 'worker']);
+const VALID_STATUSES = new Set(['active', 'inactive']);
+
+const isLastActiveOwner = async (user) => {
+  if (user.role !== 'owner' || user.status !== 'active') return false;
+  const otherActiveOwners = await User.countDocuments({
+    _id: { $ne: user._id },
+    role: 'owner',
+    status: 'active',
+  });
+  return otherActiveOwners === 0;
+};
 
 // @desc    Get all users
 // @route   GET /api/users
@@ -9,7 +24,7 @@ exports.getUsers = async (req, res) => {
     const users = await User.find({}).sort({ createdAt: -1 });
     res.status(200).json({ success: true, count: users.length, data: users });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -24,7 +39,7 @@ exports.getUserById = async (req, res) => {
     }
     res.status(200).json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -35,19 +50,23 @@ exports.createUser = async (req, res) => {
   const { name, phone, password, role, status } = req.body;
 
   try {
-    if (!name || !phone || !password) {
+    const normalizedPhone = normalizePhone(phone);
+    if (!name?.trim() || !normalizedPhone || !password || password.length < 6) {
       return res.status(400).json({ success: false, message: 'Please provide name, phone, and password' });
+    }
+    if ((role && !VALID_ROLES.has(role)) || (status && !VALID_STATUSES.has(status))) {
+      return res.status(400).json({ success: false, message: 'Invalid user role or status' });
     }
 
     // Check if phone number already registered
-    const existing = await User.findOne({ phone });
+    const existing = await User.findOne({ phone: normalizedPhone });
     if (existing) {
       return res.status(400).json({ success: false, message: `Phone number ${phone} is already registered` });
     }
 
     const newUser = new User({
-      name,
-      phone,
+      name: name.trim(),
+      phone: normalizedPhone,
       password,
       role: role || 'worker',
       status: status || 'active',
@@ -59,7 +78,7 @@ exports.createUser = async (req, res) => {
     await logAudit(
       `${req.user.name} (${req.user.phone})`,
       'USER_CREATE',
-      `User ${name} (${phone})`,
+      `User ${name.trim()} (${normalizedPhone})`,
       null,
       { name, phone, role: newUser.role, status: newUser.status }
     );
@@ -70,7 +89,7 @@ exports.createUser = async (req, res) => {
 
     res.status(201).json({ success: true, data: returnUser });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -93,16 +112,38 @@ exports.updateUser = async (req, res) => {
       status: user.status,
     };
 
-    // Check phone availability if updated
-    if (phone && phone !== user.phone) {
-      const existing = await User.findOne({ phone });
-      if (existing) {
-        return res.status(400).json({ success: false, message: `Phone number ${phone} is already registered` });
-      }
-      user.phone = phone;
+    const normalizedPhone = phone === undefined ? undefined : normalizePhone(phone);
+    if (name !== undefined && !String(name).trim()) {
+      return res.status(400).json({ success: false, message: 'User name cannot be empty' });
+    }
+    if (phone !== undefined && !normalizedPhone) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid phone number' });
+    }
+    if ((role && !VALID_ROLES.has(role)) || (status && !VALID_STATUSES.has(status))) {
+      return res.status(400).json({ success: false, message: 'Invalid user role or status' });
     }
 
-    if (name) user.name = name;
+    const targetIsSelf = user._id.toString() === req.user._id.toString();
+    if (targetIsSelf && ((role && role !== 'owner') || status === 'inactive')) {
+      return res.status(400).json({ success: false, message: 'You cannot remove your own owner access or deactivate your own account' });
+    }
+
+    const removesActiveOwner = user.role === 'owner' && user.status === 'active'
+      && (role && role !== 'owner' || status === 'inactive');
+    if (removesActiveOwner && await isLastActiveOwner(user)) {
+      return res.status(400).json({ success: false, message: 'At least one active owner account must remain' });
+    }
+
+    // Check phone availability if updated
+    if (normalizedPhone && normalizedPhone !== user.phone) {
+      const existing = await User.findOne({ phone: normalizedPhone, _id: { $ne: user._id } });
+      if (existing) {
+        return res.status(400).json({ success: false, message: `Phone number ${normalizedPhone} is already registered` });
+      }
+      user.phone = normalizedPhone;
+    }
+
+    if (name !== undefined) user.name = String(name).trim();
     if (role) user.role = role;
     if (status) user.status = status;
 
@@ -126,7 +167,7 @@ exports.updateUser = async (req, res) => {
 
     res.status(200).json({ success: true, data: newValue });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -143,6 +184,9 @@ exports.deleteUser = async (req, res) => {
     // Prevent deleting oneself
     if (user._id.toString() === req.user._id.toString()) {
       return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
+    }
+    if (await isLastActiveOwner(user)) {
+      return res.status(400).json({ success: false, message: 'The last active owner account cannot be deleted' });
     }
 
     const oldValue = {
@@ -165,7 +209,7 @@ exports.deleteUser = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'User deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -197,6 +241,6 @@ exports.resetUserPassword = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };

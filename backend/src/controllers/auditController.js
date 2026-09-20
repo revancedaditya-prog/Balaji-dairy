@@ -1,4 +1,6 @@
 const AuditLog = require('../models/AuditLog');
+const { safeRegex } = require('../utils/validation');
+const { sendControllerError } = require('../utils/http');
 
 // @desc    Get all audit logs
 // @route   GET /api/audit-logs
@@ -14,14 +16,14 @@ exports.getLogs = async (req, res) => {
     }
 
     if (user) {
-      query.user = new RegExp(user, 'i');
+      query.user = safeRegex(user);
     }
 
     if (search) {
       query.$or = [
-        { user: new RegExp(search, 'i') },
-        { action: new RegExp(search, 'i') },
-        { target: new RegExp(search, 'i') },
+        { user: safeRegex(search) },
+        { action: safeRegex(search) },
+        { target: safeRegex(search) },
       ];
     }
 
@@ -30,6 +32,6 @@ exports.getLogs = async (req, res) => {
 
     res.status(200).json({ success: true, count: logs.length, data: logs });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };

@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { paymentService } from '../../services/api';
-import * as XLSX from 'xlsx';
 import { Card, Button, Input, Badge, Modal, EmptyState, Loading } from '../Common/MaterialComponents';
+import { getISTDate } from '../../utils/dateTime';
+import { exportRowsToExcel } from '../../utils/excel';
+import { useAuth } from '../../context/AuthContext';
 
 const Payments = () => {
+  const { user } = useAuth();
+  const canRecordPayment = user?.role === 'owner';
   const [ledgerList, setLedgerList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -17,7 +21,7 @@ const Payments = () => {
   const [payAmount, setPayAmount] = useState('');
   const [payMode, setPayMode] = useState('Cash');
   const [payRemarks, setPayRemarks] = useState('');
-  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
+  const [payDate, setPayDate] = useState(getISTDate);
 
   // Detailed ledger viewing state
   const [selectedSupplierCode, setSelectedSupplierCode] = useState(null);
@@ -25,7 +29,7 @@ const Payments = () => {
   const [loadingDetailed, setLoadingDetailed] = useState(false);
   const [showTimelineModal, setShowTimelineModal] = useState(false); // Mobile-friendly timeline bottom sheet trigger
 
-  const loadLedger = async () => {
+  const loadLedger = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -39,15 +43,15 @@ const Payments = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [search, village]);
 
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
-      loadLedger();
+      void loadLedger();
     }, 300);
 
     return () => clearTimeout(delayDebounce);
-  }, [search, village]);
+  }, [loadLedger]);
 
   // Load detailed supplier ledger history
   const loadSupplierDetailedLedger = async (code) => {
@@ -75,6 +79,7 @@ const Payments = () => {
 
   const handleRecordPaymentSubmit = async (e) => {
     e.preventDefault();
+    if (!canRecordPayment) return;
     setError('');
     setSuccess('');
 
@@ -100,7 +105,7 @@ const Payments = () => {
         setPayAmount('');
         setPayRemarks('');
         setPayMode('Cash');
-        setPayDate(new Date().toISOString().split('T')[0]);
+        setPayDate(getISTDate());
 
         // Reload data
         loadLedger();
@@ -115,7 +120,7 @@ const Payments = () => {
   };
 
   // Excel export ledger
-  const exportLedgerExcel = () => {
+  const exportLedgerExcel = async () => {
     const formattedData = ledgerList.map((item) => ({
       'Supplier Code': item.supplierCode,
       'Supplier Name': item.supplierName,
@@ -128,10 +133,7 @@ const Payments = () => {
       'Status': item.status.toUpperCase()
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(formattedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Ledger_List');
-    XLSX.writeFile(workbook, `Billing_Ledger_${new Date().toISOString().split('T')[0]}.xlsx`);
+    await exportRowsToExcel(formattedData, 'Ledger List', `Billing_Ledger_${getISTDate()}.xlsx`);
   };
 
   return (
@@ -159,18 +161,18 @@ const Payments = () => {
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
           <Button variant="outlined" onClick={exportLedgerExcel} style={{ minHeight: '40px' }}>Export Ledger</Button>
-          <Button variant="primary" className="desktop-only" onClick={() => setShowPayModal(true)} style={{ minHeight: '40px' }}>Record Payment</Button>
+          {canRecordPayment && <Button variant="primary" className="desktop-only" onClick={() => setShowPayModal(true)} style={{ minHeight: '40px' }}>Record Payment</Button>}
         </div>
       </Card>
 
       {/* Floating Action Button for recording payments on mobile */}
-      <button 
+      {canRecordPayment && <button
         className="fab-md3 mobile-only" 
         onClick={() => setShowPayModal(true)}
         aria-label="Record Payment"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/><path d="M12 14v4"/><path d="M10 16h4"/></svg>
-      </button>
+      </button>}
 
       {/* Main Ledger Dashboard layout */}
       <div className="grid grid-cols-3" style={{ gap: '1rem', alignItems: 'start' }}>
@@ -194,7 +196,7 @@ const Payments = () => {
                       <th>Earnings (Due)</th>
                       <th>Paid Amount</th>
                       <th>Pending Balance</th>
-                      <th style={{ textAlign: 'right' }}>Actions</th>
+                      {canRecordPayment && <th style={{ textAlign: 'right' }}>Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -218,7 +220,7 @@ const Payments = () => {
                           }}>
                             ₹{item.pendingAmount}
                           </td>
-                          <td style={{ textAlign: 'right' }}>
+                          {canRecordPayment && <td style={{ textAlign: 'right' }}>
                             <Button
                               variant="outlined"
                               style={{ padding: '0.2rem 0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
@@ -230,12 +232,12 @@ const Payments = () => {
                             >
                               Pay
                             </Button>
-                          </td>
+                          </td>}
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="8" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
+                        <td colSpan={canRecordPayment ? 8 : 7} style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
                           No farmers registered or matching filters.
                         </td>
                       </tr>
@@ -291,13 +293,13 @@ const Payments = () => {
                     </div>
                   </div>
                   <div className="mobile-row-card-actions">
-                    <Button
+                    {canRecordPayment && <Button
                       variant="outlined"
                       style={{ padding: '0.25rem 0.75rem', minHeight: '36px', fontSize: '0.8rem', marginRight: '0.5rem' }}
                       onClick={(e) => handleOpenMobileHistory(item.supplierCode, e)}
                     >
                       History
-                    </Button>
+                    </Button>}
                     <Button
                       variant="primary"
                       style={{ padding: '0.25rem 0.75rem', minHeight: '36px', fontSize: '0.8rem' }}
@@ -457,7 +459,7 @@ const Payments = () => {
       </Modal>
 
       {/* Record Payment Receipt Modal Form Dialog */}
-      <Modal
+      {canRecordPayment && <Modal
         isOpen={showPayModal}
         onClose={() => setShowPayModal(false)}
         title="Record Farmer Payment"
@@ -477,6 +479,7 @@ const Payments = () => {
             type="number"
             inputMode="decimal"
             step="0.01"
+            min="0.01"
             placeholder="Enter payment amount"
             value={payAmount}
             onChange={(e) => setPayAmount(e.target.value)}
@@ -512,7 +515,7 @@ const Payments = () => {
             <Button type="submit" variant="primary">Save Payment</Button>
           </div>
         </form>
-      </Modal>
+      </Modal>}
 
     </div>
   );

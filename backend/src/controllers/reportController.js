@@ -1,23 +1,37 @@
 const MilkEntry = require('../models/MilkEntry');
 const Supplier = require('../models/Supplier');
+const { getISTDate } = require('../utils/dateTime');
+const { isIsoDate, safeRegex, toPositiveInteger } = require('../utils/validation');
+const { sendControllerError } = require('../utils/http');
+
+const badRequest = (message) => Object.assign(new Error(message), { status: 400 });
 
 // Helper to construct a standard match stage
 const buildMatchStage = (query) => {
-  const { startDate, endDate, shift, supplierCode, village } = query;
+  const { startDate, endDate, shift, supplierCode } = query;
   let match = {};
 
   if (startDate || endDate) {
+    if ((startDate && !isIsoDate(startDate)) || (endDate && !isIsoDate(endDate))) {
+      throw badRequest('Date filters must use YYYY-MM-DD format');
+    }
+    if (startDate && endDate && startDate > endDate) {
+      throw badRequest('Start date cannot be after end date');
+    }
     match.date = {};
     if (startDate) match.date.$gte = startDate;
     if (endDate) match.date.$lte = endDate;
   }
 
   if (shift) {
+    if (!['Morning', 'Evening'].includes(shift)) throw badRequest('Invalid shift filter');
     match.shift = shift;
   }
 
   if (supplierCode) {
-    match.supplierCode = parseInt(supplierCode, 10);
+    const parsedCode = toPositiveInteger(supplierCode);
+    if (!parsedCode) throw badRequest('Supplier code must be a positive integer');
+    match.supplierCode = parsedCode;
   }
 
   return match;
@@ -58,7 +72,7 @@ const commonProjectStage = {
 // @access  Private
 exports.getDashboardStats = async (req, res) => {
   try {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getISTDate();
     const firstDayOfMonth = todayStr.substring(0, 7) + '-01';
 
     // 1. Total active suppliers
@@ -129,7 +143,7 @@ exports.getDashboardStats = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -147,8 +161,9 @@ exports.getChartsData = async (req, res) => {
           amount: { $sum: '$amount' },
         },
       },
-      { $sort: { _id: 1 } },
+      { $sort: { _id: -1 } },
       { $limit: 10 },
+      { $sort: { _id: 1 } },
       {
         $project: {
           date: '$_id',
@@ -160,7 +175,7 @@ exports.getChartsData = async (req, res) => {
     ]);
 
     // B. Monthly Trend (months of current year)
-    const currentYear = new Date().getFullYear().toString();
+    const currentYear = getISTDate().slice(0, 4);
     const monthlyTrend = await MilkEntry.aggregate([
       {
         $match: {
@@ -186,9 +201,8 @@ exports.getChartsData = async (req, res) => {
     ]);
 
     // C. Top 5 suppliers by quantity (last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgoStr = getISTDate(thirtyDaysAgo);
 
     const topSuppliers = await MilkEntry.aggregate([
       { $match: { date: { $gte: thirtyDaysAgoStr } } },
@@ -220,7 +234,7 @@ exports.getChartsData = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -233,7 +247,7 @@ exports.getShiftWiseReport = async (req, res) => {
 
     // If village is specified, filter codes
     if (req.query.village) {
-      const sups = await Supplier.find({ village: new RegExp(req.query.village, 'i') }).select('supplierCode');
+      const sups = await Supplier.find({ village: safeRegex(req.query.village) }).select('supplierCode');
       const codes = sups.map(s => s.supplierCode);
       match.supplierCode = { $in: codes };
     }
@@ -259,7 +273,7 @@ exports.getShiftWiseReport = async (req, res) => {
 
     res.status(200).json({ success: true, data: report });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -271,7 +285,7 @@ exports.getSupplierWiseReport = async (req, res) => {
     const match = buildMatchStage(req.query);
 
     if (req.query.village) {
-      const sups = await Supplier.find({ village: new RegExp(req.query.village, 'i') }).select('supplierCode');
+      const sups = await Supplier.find({ village: safeRegex(req.query.village) }).select('supplierCode');
       const codes = sups.map(s => s.supplierCode);
       match.supplierCode = { $in: codes };
     }
@@ -298,7 +312,7 @@ exports.getSupplierWiseReport = async (req, res) => {
 
     res.status(200).json({ success: true, data: report });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -325,7 +339,7 @@ exports.getVillageWiseReport = async (req, res) => {
       {
         // Filter by village if query param is set
         $match: req.query.village
-          ? { 'supplierInfo.village': new RegExp(req.query.village, 'i') }
+          ? { 'supplierInfo.village': safeRegex(req.query.village) }
           : {},
       },
       {
@@ -346,7 +360,7 @@ exports.getVillageWiseReport = async (req, res) => {
 
     res.status(200).json({ success: true, data: report });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -358,7 +372,7 @@ exports.getMonthlyReport = async (req, res) => {
     const match = buildMatchStage(req.query);
 
     if (req.query.village) {
-      const sups = await Supplier.find({ village: new RegExp(req.query.village, 'i') }).select('supplierCode');
+      const sups = await Supplier.find({ village: safeRegex(req.query.village) }).select('supplierCode');
       const codes = sups.map(s => s.supplierCode);
       match.supplierCode = { $in: codes };
     }
@@ -383,7 +397,7 @@ exports.getMonthlyReport = async (req, res) => {
 
     res.status(200).json({ success: true, data: report });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -395,7 +409,7 @@ exports.getYearlyReport = async (req, res) => {
     const match = buildMatchStage(req.query);
 
     if (req.query.village) {
-      const sups = await Supplier.find({ village: new RegExp(req.query.village, 'i') }).select('supplierCode');
+      const sups = await Supplier.find({ village: safeRegex(req.query.village) }).select('supplierCode');
       const codes = sups.map(s => s.supplierCode);
       match.supplierCode = { $in: codes };
     }
@@ -420,6 +434,6 @@ exports.getYearlyReport = async (req, res) => {
 
     res.status(200).json({ success: true, data: report });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };

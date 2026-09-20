@@ -1,16 +1,25 @@
-import React, { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/Common/Sidebar';
 import BottomNavigation from './components/Common/BottomNavigation';
 import Login from './components/Auth/Login';
-import Dashboard from './components/Dashboard/Dashboard';
-import MilkCollection from './components/MilkCollection/MilkCollection';
-import Suppliers from './components/Suppliers/Suppliers';
-import Payments from './components/Payments/Payments';
-import Reports from './components/Reports/Reports';
-import Settings from './components/Settings/Settings';
-import UserManagement from './components/UserManagement/UserManagement';
 import './App.css';
+
+const Dashboard = lazy(() => import('./components/Dashboard/Dashboard'));
+const MilkCollection = lazy(() => import('./components/MilkCollection/MilkCollection'));
+const Suppliers = lazy(() => import('./components/Suppliers/Suppliers'));
+const Payments = lazy(() => import('./components/Payments/Payments'));
+const Reports = lazy(() => import('./components/Reports/Reports'));
+const Settings = lazy(() => import('./components/Settings/Settings'));
+const UserManagement = lazy(() => import('./components/UserManagement/UserManagement'));
+const RateChart = lazy(() => import('./components/RateChart/RateChart'));
+
+const PageLoading = () => (
+  <div className="loading-container" style={{ minHeight: '40vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+    <div className="spinner"></div>
+    <p style={{ marginTop: '1rem', color: '#64748b', fontSize: '0.9rem', fontWeight: '500' }}>Loading page...</p>
+  </div>
+);
 
 const MainApp = () => {
   const { user, loading } = useAuth();
@@ -32,10 +41,10 @@ const MainApp = () => {
   // Active view switcher
   const renderActiveView = () => {
     // Role-based security check for active tab
-    if (user?.role === 'worker' && !['dashboard', 'collection', 'suppliers'].includes(activeTab)) {
+    if (user?.role === 'worker' && !['dashboard', 'collection', 'suppliers', 'settings'].includes(activeTab)) {
       return <Dashboard />;
     }
-    if (user?.role === 'manager' && !['dashboard', 'collection', 'suppliers', 'payments', 'reports'].includes(activeTab)) {
+    if (user?.role === 'manager' && !['dashboard', 'collection', 'suppliers', 'payments', 'reports', 'settings'].includes(activeTab)) {
       return <Dashboard />;
     }
 
@@ -52,6 +61,8 @@ const MainApp = () => {
         return <Reports />;
       case 'users':
         return <UserManagement />;
+      case 'rates':
+        return <RateChart />;
       case 'settings':
         return <Settings setActiveTab={setActiveTab} />; // Pass down to allow navigations to Payments/Users from Settings
       default:
@@ -68,6 +79,7 @@ const MainApp = () => {
       case 'payments': return 'Payments Ledger';
       case 'reports': return 'Reports';
       case 'users': return 'System Users';
+      case 'rates': return 'Milk Rate Chart';
       case 'settings': return 'App Settings';
       default: return 'Balaji Dairy';
     }
@@ -85,12 +97,8 @@ const MainApp = () => {
 
           <div className="topbar-actions">
             <span className="topbar-date desktop-only">
-              {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+              {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
             </span>
-            {/* Placeholder Notification Icon */}
-            <button style={{ background: 'transparent', border: 'none', color: 'var(--md-sys-color-on-surface-variant)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }} aria-label="Notifications">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-            </button>
             <div className="topbar-avatar" title={user?.role?.toUpperCase()}>
               {user?.name ? user.name[0].toUpperCase() : 'B'}
             </div>
@@ -99,7 +107,9 @@ const MainApp = () => {
 
         {/* Dynamic page content */}
         <main className="content-container">
-          {renderActiveView()}
+          <Suspense fallback={<PageLoading />}>
+            {renderActiveView()}
+          </Suspense>
         </main>
 
         {/* Bottom Navigation (Mobile-only via CSS) */}

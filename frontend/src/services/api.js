@@ -1,11 +1,20 @@
 import axios from 'axios';
 
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, '');
+const missingProductionApiUrl = import.meta.env.PROD && !configuredApiUrl;
+const apiBaseUrl = configuredApiUrl || 'http://localhost:5001/api';
+
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5001/api',
+  baseURL: apiBaseUrl,
+  timeout: 20000,
 });
 
 // Request interceptor to add JWT token
 API.interceptors.request.use((config) => {
+  if (missingProductionApiUrl) {
+    return Promise.reject(new Error('Application configuration error: VITE_API_URL is not set'));
+  }
+
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -210,11 +219,6 @@ export const userService = {
 };
 
 export const backupService = {
-  exportUrl: () => {
-    const token = localStorage.getItem('token');
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-    return `${baseUrl}/backup/export?token=${token}`;
-  },
   triggerExport: async () => {
     const res = await API.get('/backup/export', { responseType: 'blob' });
     return res.data;

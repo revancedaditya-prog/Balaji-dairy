@@ -1,35 +1,26 @@
 const MilkEntry = require('../models/MilkEntry');
 const Supplier = require('../models/Supplier');
-const RateChart = require('../models/RateChart');
 const logAudit = require('../utils/auditLogger');
-
-// Helper to get current Indian standard date and time
-const getISTDateTime = () => {
-  const dateObj = new Date();
-  // Format YYYY-MM-DD
-  const offset = 5.5 * 60 * 60 * 1000; // IST is UTC + 5:30
-  const istDate = new Date(dateObj.getTime() + offset);
-  const dateStr = istDate.toISOString().split('T')[0];
-  const timeStr = istDate.toISOString().split('T')[1].substring(0, 8);
-  return { dateStr, timeStr };
-};
+const { getISTDateTime } = require('../utils/dateTime');
+const {
+  isIsoDate,
+  isTime,
+  safeRegex,
+  toFiniteNumber,
+  toNonNegativeNumber,
+  toPositiveInteger,
+  toPositiveNumber,
+} = require('../utils/validation');
+const { sendControllerError } = require('../utils/http');
 
 // Helper to detect shift
 const detectShift = (timeStr) => {
   const hour = parseInt(timeStr.split(':')[0], 10);
-  if (hour >= 4 && hour < 12) {
+  if (hour >= 4 && hour < 14) {
     return 'Morning';
   } else {
     return 'Evening';
   }
-};
-
-// Helper to look up rate
-const getRate = async (fat, snf) => {
-  const rFat = Math.round(fat * 10) / 10;
-  const rSnf = Math.round(snf * 10) / 10;
-  const entry = await RateChart.findOne({ fat: rFat, snf: rSnf });
-  return entry ? entry.rate : 0;
 };
 
 // @desc    Add new milk entry
@@ -44,15 +35,24 @@ exports.addEntry = async (req, res) => {
     remarks,
   } = req.body;
 
-  let { date, time, shift, rate } = req.body;
+  let { date, time, shift } = req.body;
 
   try {
-    if (!supplierCode || !milkQuantity || req.body.amount === undefined || req.body.amount === null) {
+    const parsedSupplierCode = toPositiveInteger(supplierCode);
+    const parsedQuantity = toPositiveNumber(milkQuantity);
+    const parsedAmount = toPositiveNumber(req.body.amount);
+    const parsedFat = fat === undefined || fat === null || fat === '' ? 0 : toNonNegativeNumber(fat);
+    const parsedSnf = snf === undefined || snf === null || snf === '' ? 0 : toNonNegativeNumber(snf);
+
+    if (!parsedSupplierCode || !parsedQuantity || !parsedAmount) {
       return res.status(400).json({ success: false, message: 'Please provide supplierCode, milkQuantity, and total amount' });
+    }
+    if (parsedFat === null || parsedSnf === null) {
+      return res.status(400).json({ success: false, message: 'Fat and SNF cannot be negative or invalid' });
     }
 
     // Auto fetch supplier details
-    const supplier = await Supplier.findOne({ supplierCode });
+    const supplier = await Supplier.findOne({ supplierCode: parsedSupplierCode });
     if (!supplier) {
       return res.status(404).json({ success: false, message: `Supplier Code #${supplierCode} does not exist` });
     }
@@ -70,23 +70,26 @@ exports.addEntry = async (req, res) => {
     if (!shift) {
       shift = detectShift(time);
     }
+    if (!isIsoDate(date) || !isTime(time)) {
+      return res.status(400).json({ success: false, message: 'Date or time format is invalid' });
+    }
+    if (!['Morning', 'Evening'].includes(shift)) {
+      return res.status(400).json({ success: false, message: 'Shift must be Morning or Evening' });
+    }
 
-    const fFat = fat !== undefined && fat !== null ? parseFloat(fat) : 0;
-    const fSnf = snf !== undefined && snf !== null ? parseFloat(snf) : 0;
-    const fAmount = parseFloat(req.body.amount);
-    const fRate = Math.round((fAmount / milkQuantity) * 100) / 100;
+    const fRate = Math.round((parsedAmount / parsedQuantity) * 100) / 100;
 
     const newEntry = await MilkEntry.create({
-      supplierCode,
+      supplierCode: parsedSupplierCode,
       supplierName: supplier.supplierName,
       date,
       time,
       shift,
-      milkQuantity,
-      fat: fFat,
-      snf: fSnf,
+      milkQuantity: parsedQuantity,
+      fat: parsedFat,
+      snf: parsedSnf,
       rate: fRate,
-      amount: fAmount,
+      amount: parsedAmount,
       remarks,
       createdBy: req.user._id,
     });
@@ -94,14 +97,14 @@ exports.addEntry = async (req, res) => {
     await logAudit(
       `${req.user.name} (${req.user.phone})`,
       'MILK_ENTRY_ADD',
-      `Milk Entry for Supplier #${supplierCode} (${shift} - ${date})`,
+      `Milk Entry for Supplier #${parsedSupplierCode} (${shift} - ${date})`,
       null,
       newEntry
     );
 
     res.status(201).json({ success: true, data: newEntry });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -127,6 +130,12 @@ exports.getEntries = async (req, res) => {
 
     // Date range filter
     if (startDate || endDate) {
+      if ((startDate && !isIsoDate(startDate)) || (endDate && !isIsoDate(endDate))) {
+        return res.status(400).json({ success: false, message: 'Date filters must use a valid YYYY-MM-DD date' });
+      }
+      if (startDate && endDate && startDate > endDate) {
+        return res.status(400).json({ success: false, message: 'Start date cannot be after end date' });
+      }
       query.date = {};
       if (startDate) query.date.$gte = startDate;
       if (endDate) query.date.$lte = endDate;
@@ -134,47 +143,72 @@ exports.getEntries = async (req, res) => {
 
     // Shift filter
     if (shift) {
+      if (!['Morning', 'Evening'].includes(shift)) {
+        return res.status(400).json({ success: false, message: 'Shift must be Morning or Evening' });
+      }
       query.shift = shift;
     }
 
     // Supplier Code filter
     if (supplierCode) {
-      query.supplierCode = parseInt(supplierCode, 10);
+      const parsedCode = toPositiveInteger(supplierCode);
+      if (!parsedCode) return res.status(400).json({ success: false, message: 'Supplier code must be a positive integer' });
+      query.supplierCode = parsedCode;
     }
 
     // Supplier Name filter (text match)
     if (supplierName) {
-      query.supplierName = new RegExp(supplierName, 'i');
+      query.supplierName = safeRegex(supplierName);
     }
 
     // Fat range filter
     if (minFat || maxFat) {
       query.fat = {};
-      if (minFat) query.fat.$gte = parseFloat(minFat);
-      if (maxFat) query.fat.$lte = parseFloat(maxFat);
+      const parsedMinFat = minFat ? toFiniteNumber(minFat) : null;
+      const parsedMaxFat = maxFat ? toFiniteNumber(maxFat) : null;
+      if ((minFat && (parsedMinFat === null || parsedMinFat < 0)) || (maxFat && (parsedMaxFat === null || parsedMaxFat < 0))) {
+        return res.status(400).json({ success: false, message: 'Fat range must contain non-negative numbers' });
+      }
+      if (parsedMinFat !== null && parsedMaxFat !== null && parsedMinFat > parsedMaxFat) {
+        return res.status(400).json({ success: false, message: 'Minimum fat cannot exceed maximum fat' });
+      }
+      if (parsedMinFat !== null) query.fat.$gte = parsedMinFat;
+      if (parsedMaxFat !== null) query.fat.$lte = parsedMaxFat;
     }
 
     // Rate range filter
     if (minRate || maxRate) {
       query.rate = {};
-      if (minRate) query.rate.$gte = parseFloat(minRate);
-      if (maxRate) query.rate.$lte = parseFloat(maxRate);
+      const parsedMinRate = minRate ? toFiniteNumber(minRate) : null;
+      const parsedMaxRate = maxRate ? toFiniteNumber(maxRate) : null;
+      if ((minRate && (parsedMinRate === null || parsedMinRate < 0)) || (maxRate && (parsedMaxRate === null || parsedMaxRate < 0))) {
+        return res.status(400).json({ success: false, message: 'Rate range must contain non-negative numbers' });
+      }
+      if (parsedMinRate !== null && parsedMaxRate !== null && parsedMinRate > parsedMaxRate) {
+        return res.status(400).json({ success: false, message: 'Minimum rate cannot exceed maximum rate' });
+      }
+      if (parsedMinRate !== null) query.rate.$gte = parsedMinRate;
+      if (parsedMaxRate !== null) query.rate.$lte = parsedMaxRate;
     }
 
     // Village filter (milk entries don't store village directly, so we find matching supplier codes)
     if (village) {
       const suppliersInVillage = await Supplier.find({
-        village: new RegExp(village, 'i'),
+        village: safeRegex(village),
       }).select('supplierCode');
 
       const codes = suppliersInVillage.map((s) => s.supplierCode);
-      query.supplierCode = { $in: codes };
+      if (typeof query.supplierCode === 'number') {
+        if (!codes.includes(query.supplierCode)) query.supplierCode = { $in: [] };
+      } else {
+        query.supplierCode = { $in: codes };
+      }
     }
 
     const entries = await MilkEntry.find(query).sort({ date: -1, time: -1 });
     res.status(200).json({ success: true, count: entries.length, data: entries });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -189,7 +223,7 @@ exports.getEntryById = async (req, res) => {
     }
     res.status(200).json({ success: true, data: entry });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -198,8 +232,6 @@ exports.getEntryById = async (req, res) => {
 // @access  Private
 exports.updateEntry = async (req, res) => {
   const { milkQuantity, fat, snf, date, time, shift, remarks } = req.body;
-  let { rate } = req.body;
-
   try {
     const entry = await MilkEntry.findById(req.params.id);
     if (!entry) {
@@ -209,26 +241,59 @@ exports.updateEntry = async (req, res) => {
     const oldValue = entry.toObject();
 
     // Check supplier info if code updated (not standard but supported)
-    if (req.body.supplierCode && req.body.supplierCode !== entry.supplierCode) {
-      const supplier = await Supplier.findOne({ supplierCode: req.body.supplierCode });
+    if (req.body.supplierCode !== undefined) {
+      const parsedSupplierCode = toPositiveInteger(req.body.supplierCode);
+      if (!parsedSupplierCode) {
+        return res.status(400).json({ success: false, message: 'Supplier code must be a positive integer' });
+      }
+      const supplier = await Supplier.findOne({ supplierCode: parsedSupplierCode });
       if (!supplier) {
         return res.status(404).json({ success: false, message: `Supplier Code #${req.body.supplierCode} does not exist` });
+      }
+      if (supplier.status !== 'active') {
+        return res.status(400).json({ success: false, message: `Supplier #${parsedSupplierCode} is inactive` });
       }
       entry.supplierCode = supplier.supplierCode;
       entry.supplierName = supplier.supplierName;
     }
 
-    if (date) entry.date = date;
-    if (time) entry.time = time;
-    if (shift) entry.shift = shift;
+    if (date !== undefined) {
+      if (!isIsoDate(date)) return res.status(400).json({ success: false, message: 'Date must be a valid YYYY-MM-DD date' });
+      entry.date = date;
+    }
+    if (time !== undefined) {
+      if (!isTime(time)) return res.status(400).json({ success: false, message: 'Time must use HH:MM or HH:MM:SS format' });
+      entry.time = time;
+      if (shift === undefined) entry.shift = detectShift(time);
+    }
+    if (shift !== undefined) {
+      if (!['Morning', 'Evening'].includes(shift)) {
+        return res.status(400).json({ success: false, message: 'Shift must be Morning or Evening' });
+      }
+      entry.shift = shift;
+    }
     if (remarks !== undefined) entry.remarks = remarks;
 
     // Update fields
-    if (milkQuantity !== undefined) entry.milkQuantity = parseFloat(milkQuantity);
-    if (fat !== undefined) entry.fat = parseFloat(fat);
-    if (snf !== undefined) entry.snf = parseFloat(snf);
-    if (req.body.amount !== undefined && req.body.amount !== null) {
-      entry.amount = parseFloat(req.body.amount);
+    if (milkQuantity !== undefined) {
+      const parsedQuantity = toPositiveNumber(milkQuantity);
+      if (!parsedQuantity) return res.status(400).json({ success: false, message: 'Milk quantity must be greater than zero' });
+      entry.milkQuantity = parsedQuantity;
+    }
+    if (fat !== undefined) {
+      const parsedFat = toNonNegativeNumber(fat);
+      if (parsedFat === null) return res.status(400).json({ success: false, message: 'Fat cannot be negative or invalid' });
+      entry.fat = parsedFat;
+    }
+    if (snf !== undefined) {
+      const parsedSnf = toNonNegativeNumber(snf);
+      if (parsedSnf === null) return res.status(400).json({ success: false, message: 'SNF cannot be negative or invalid' });
+      entry.snf = parsedSnf;
+    }
+    if (req.body.amount !== undefined) {
+      const parsedAmount = toPositiveNumber(req.body.amount);
+      if (!parsedAmount) return res.status(400).json({ success: false, message: 'Amount must be greater than zero' });
+      entry.amount = parsedAmount;
     }
 
     // Recalculate rate based on updated amount and quantity
@@ -246,7 +311,7 @@ exports.updateEntry = async (req, res) => {
 
     res.status(200).json({ success: true, data: updatedEntry });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -274,6 +339,6 @@ exports.deleteEntry = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Milk entry deleted successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };

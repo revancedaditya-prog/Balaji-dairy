@@ -5,6 +5,7 @@ const SupplierSchema = new mongoose.Schema(
     supplierCode: {
       type: Number,
       required: [true, 'Please add a supplier code'],
+      min: [1, 'Supplier code must be greater than zero'],
       unique: true,
       index: true,
     },
@@ -20,6 +21,7 @@ const SupplierSchema = new mongoose.Schema(
     mobile: {
       type: String,
       trim: true,
+      match: [/^$|^\d{7,15}$/, 'Please add a valid mobile number'],
     },
     village: {
       type: String,

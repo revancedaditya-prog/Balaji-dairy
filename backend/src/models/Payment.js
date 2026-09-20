@@ -1,15 +1,18 @@
 const mongoose = require('mongoose');
+const { isIsoDate } = require('../utils/validation');
 
 const PaymentSchema = new mongoose.Schema(
   {
     supplierCode: {
       type: Number,
       required: [true, 'Supplier code is required'],
+      min: [1, 'Supplier code must be greater than zero'],
       index: true,
     },
     date: {
       type: String, // Stored as 'YYYY-MM-DD'
       required: [true, 'Payment date is required'],
+      validate: { validator: isIsoDate, message: 'Payment date must be a valid YYYY-MM-DD date' },
       index: true,
     },
     amountPaid: {

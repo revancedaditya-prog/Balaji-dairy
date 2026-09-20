@@ -3,9 +3,7 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const RateChart = require('../models/RateChart');
 const Supplier = require('../models/Supplier');
-const MilkEntry = require('../models/MilkEntry');
-const Payment = require('../models/Payment');
-const AuditLog = require('../models/AuditLog');
+const { normalizePhone } = require('../utils/validation');
 
 const connectDB = async () => {
   const uri = process.env.MONGODB_URI;
@@ -22,26 +20,26 @@ const seed = async () => {
     await connectDB();
     console.log('MongoDB connection established.');
 
-    // 1. Seed Owner
-    console.log('Seeding owner...');
-    // Clear existing owners
-    await User.deleteMany({ role: 'owner' });
+    // 1. Seed or update the owner without embedding credentials in source control.
+    const ownerPhone = normalizePhone(process.env.SEED_OWNER_PHONE);
+    const ownerPassword = process.env.SEED_OWNER_PASSWORD;
+    const ownerName = process.env.SEED_OWNER_NAME?.trim() || 'Dairy Owner';
+    if (!ownerPhone || !ownerPassword || ownerPassword.length < 8) {
+      throw new Error('SEED_OWNER_PHONE and SEED_OWNER_PASSWORD (minimum 8 characters) are required');
+    }
 
-    const owner = new User({
-      name: 'Aditya Kumar',
-      phone: '7906564964',
-      password: 'AdityaOwner123', // Will be hashed by pre-save middleware
-      role: 'owner',
-      status: 'active',
-    });
-
+    console.log('Seeding owner account...');
+    let owner = await User.findOne({ phone: ownerPhone }).select('+password');
+    if (!owner) owner = new User({ phone: ownerPhone });
+    owner.name = ownerName;
+    owner.password = ownerPassword;
+    owner.role = 'owner';
+    owner.status = 'active';
     await owner.save();
-    console.log('Owner seeded: Phone "7906564964", Password "AdityaOwner123"');
+    console.log(`Owner account seeded for phone ending in ${ownerPhone.slice(-4)}.`);
 
     // 2. Seed Rate Chart
     console.log('Seeding Rate Chart matrix...');
-    await RateChart.deleteMany({});
-
     const rates = [];
     // FAT: 3.0 to 10.0 in 0.1 increments
     // SNF: 7.0 to 10.0 in 0.1 increments
@@ -53,8 +51,12 @@ const seed = async () => {
       }
     }
 
-    const operations = rates.map((r) => ({
-      insertOne: { document: r },
+    const operations = rates.map((rate) => ({
+      updateOne: {
+        filter: { fat: rate.fat, snf: rate.snf },
+        update: { $set: { rate: rate.rate } },
+        upsert: true,
+      },
     }));
 
     // Run bulk write in batches of 1000 to keep it clean
@@ -65,14 +67,10 @@ const seed = async () => {
     }
     console.log(`Rate chart seeded with ${rates.length} cells (FAT: 3.0-10.0, SNF: 7.0-10.0).`);
 
-    // 3. Optional: Seed some mockup suppliers
-    console.log('Seeding dummy suppliers for UI visibility...');
-    await Supplier.deleteMany({});
-    await MilkEntry.deleteMany({});
-    await Payment.deleteMany({});
-    await AuditLog.deleteMany({});
-
-    const suppliers = [
+    // 3. Demo suppliers are opt-in and never wipe existing business data.
+    if (process.env.SEED_DEMO_DATA === 'true') {
+      console.log('Seeding demo suppliers...');
+      const suppliers = [
       {
         supplierCode: 101,
         supplierName: 'Ramesh Patel',
@@ -113,10 +111,17 @@ const seed = async () => {
         status: 'inactive',
         joiningDate: new Date('2026-03-20'),
       },
-    ];
+      ];
 
-    await Supplier.insertMany(suppliers);
-    console.log('Dummy suppliers seeded.');
+      await Supplier.bulkWrite(suppliers.map((supplier) => ({
+        updateOne: {
+          filter: { supplierCode: supplier.supplierCode },
+          update: { $setOnInsert: supplier },
+          upsert: true,
+        },
+      })));
+      console.log('Demo suppliers seeded.');
+    }
 
     console.log('Database seeded successfully!');
     process.exit(0);

@@ -20,12 +20,12 @@ const runVerification = async () => {
     await mongoose.connect(uri);
     console.log('✅ Connected to MongoDB successfully.');
 
-    // 1. Check Owner User
-    const owner = await User.findOne({ role: 'owner', phone: '7906564964' });
+    // 1. Check that at least one usable owner account exists.
+    const owner = await User.findOne({ role: 'owner', status: 'active' });
     if (owner) {
       console.log(`✅ Owner User verified. Name: "${owner.name}", Phone: "${owner.phone}", Status: "${owner.status}"`);
     } else {
-      console.log('❌ Owner User (phone: 7906564964) NOT found in the database. Please run "npm run seed" in the backend.');
+      console.log('❌ No active owner user found. Configure SEED_OWNER_* values and run "npm run seed" in the backend.');
     }
 
     // 2. Check Rate Chart Entries

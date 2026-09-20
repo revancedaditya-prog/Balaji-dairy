@@ -7,7 +7,7 @@ const {
   updateEntry,
   deleteEntry,
 } = require('../controllers/milkEntryController');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, authorize } = require('../middleware/authMiddleware');
 
 router.use(protect); // Guard all routes
 
@@ -17,7 +17,7 @@ router.route('/')
 
 router.route('/:id')
   .get(getEntryById)
-  .put(updateEntry)
-  .delete(deleteEntry);
+  .put(authorize('owner', 'manager'), updateEntry)
+  .delete(authorize('owner', 'manager'), deleteEntry);
 
 module.exports = router;

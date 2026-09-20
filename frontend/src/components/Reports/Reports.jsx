@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { reportService } from '../../services/api';
-import * as XLSX from 'xlsx';
 import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
+import { getISTDate } from '../../utils/dateTime';
+import { exportRowsToExcel } from '../../utils/excel';
+import { escapeHtml, printHtml } from '../../utils/html';
 
 const Reports = () => {
   const [reportType, setReportType] = useState('shift-wise');
@@ -10,8 +12,8 @@ const Reports = () => {
   const [error, setError] = useState('');
 
   // Filters State
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(getISTDate);
+  const [endDate, setEndDate] = useState(getISTDate);
   const [filterShift, setFilterShift] = useState('');
   const [filterCode, setFilterCode] = useState('');
   const [filterVillage, setFilterVillage] = useState('');
@@ -19,7 +21,7 @@ const Reports = () => {
   // Collapsible Filters Panel on Mobile
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
-  const loadReport = async () => {
+  const loadReport = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -61,11 +63,11 @@ const Reports = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [endDate, filterCode, filterShift, filterVillage, reportType, startDate]);
 
   useEffect(() => {
-    loadReport();
-  }, [reportType, startDate, endDate, filterShift, filterCode, filterVillage]);
+    void loadReport();
+  }, [loadReport]);
 
   // Aggregate stats from report data
   const totalMilk = reportData.reduce((sum, item) => sum + item.totalMilk, 0);
@@ -135,7 +137,7 @@ const Reports = () => {
   };
 
   // Excel Export
-  const exportExcel = () => {
+  const exportExcel = async () => {
     const headers = getHeaders();
     const rows = reportData.map((item) => {
       const row = {};
@@ -146,10 +148,7 @@ const Reports = () => {
       return row;
     });
 
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
-    XLSX.writeFile(workbook, `Report_${reportType}_${startDate}_to_${endDate}.xlsx`);
+    await exportRowsToExcel(rows, 'Report', `Report_${reportType}_${startDate}_to_${endDate}.xlsx`);
   };
 
   // PDF Export
@@ -157,7 +156,7 @@ const Reports = () => {
     const printContent = `
       <html>
         <head>
-          <title>${reportType.toUpperCase()} REPORT - Balaji Dairy</title>
+          <title>${escapeHtml(reportType.toUpperCase())} REPORT - Balaji Dairy</title>
           <style>
             body { font-family: sans-serif; padding: 20px; color: #333; }
             h2 { text-align: center; color: #1e40af; margin-bottom: 5px; }
@@ -173,7 +172,7 @@ const Reports = () => {
         </head>
         <body>
           <h2>BALAJI DAIRY COLLECTION STATION</h2>
-          <h4>${reportType.toUpperCase()} SUMMARY STATEMENT (${startDate} to ${endDate})</h4>
+          <h4>${escapeHtml(reportType.toUpperCase())} SUMMARY STATEMENT (${escapeHtml(startDate)} to ${escapeHtml(endDate)})</h4>
           <div class="kpi-section">
             <div class="kpi-item">Total Milk Volume<div class="kpi-val">${totalMilk.toFixed(2)} L</div></div>
             <div class="kpi-item">Weighted Avg FAT<div class="kpi-val">${avgFat.toFixed(2)}%</div></div>
@@ -183,13 +182,13 @@ const Reports = () => {
           <table>
             <thead>
               <tr>
-                ${getHeaders().map(h => `<th>${h}</th>`).join('')}
+                ${getHeaders().map(h => `<th>${escapeHtml(h)}</th>`).join('')}
               </tr>
             </thead>
             <tbody>
               ${reportData.map(item => `
                 <tr>
-                  ${getRowCells(item).map(cell => `<td>${cell}</td>`).join('')}
+                  ${getRowCells(item).map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}
                 </tr>
               `).join('')}
             </tbody>
@@ -198,12 +197,7 @@ const Reports = () => {
       </html>
     `;
 
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
+    printHtml(printContent);
   };
 
   return (

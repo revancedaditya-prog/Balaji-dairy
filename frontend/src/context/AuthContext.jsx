@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
+import { createContext, useState, useEffect, useContext } from 'react';
 import { authService } from '../services/api';
 
 const AuthContext = createContext();
@@ -6,7 +6,6 @@ const AuthContext = createContext();
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
   const checkAuth = async () => {
     const token = localStorage.getItem('token');
@@ -23,7 +22,7 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('token');
         setUser(null);
       }
-    } catch (err) {
+    } catch {
       localStorage.removeItem('token');
       setUser(null);
     } finally {
@@ -48,7 +47,7 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       return {
         success: false,
-        message: err.response?.data?.message || 'Login failed'
+        message: err.response?.data?.message || err.message || 'Login failed'
       };
     } finally {
       setLoading(false);
@@ -65,7 +64,7 @@ export const AuthProvider = ({ children }) => {
       const data = await authService.changePassword(oldPassword, newPassword);
       return data;
     } catch (err) {
-      throw new Error(err.response?.data?.message || 'Failed to update password');
+      throw new Error(err.response?.data?.message || 'Failed to update password', { cause: err });
     }
   };
 
@@ -74,7 +73,6 @@ export const AuthProvider = ({ children }) => {
       value={{
         user,
         loading,
-        error,
         login,
         logout,
         changePassword,

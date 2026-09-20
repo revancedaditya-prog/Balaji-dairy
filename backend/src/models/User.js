@@ -11,6 +11,7 @@ const UserSchema = new mongoose.Schema(
     phone: {
       type: String,
       required: [true, 'Please add a phone number'],
+      match: [/^\d{7,15}$/, 'Please add a valid phone number'],
       unique: true,
       trim: true,
       index: true,
@@ -24,7 +25,7 @@ const UserSchema = new mongoose.Schema(
     role: {
       type: String,
       enum: ['owner', 'manager', 'worker'],
-      default: 'owner',
+      default: 'worker',
     },
     status: {
       type: String,

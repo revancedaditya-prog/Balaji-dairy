@@ -1,10 +1,13 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const logAudit = require('../utils/auditLogger');
+const { getJwtSecret } = require('../config/env');
+const { normalizePhone } = require('../utils/validation');
+const { sendControllerError } = require('../utils/http');
 
 // Generate Token
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'balaji_dairy_secret_jwt_2026_secure_key_987', {
+  return jwt.sign({ id }, getJwtSecret(), {
     expiresIn: process.env.JWT_EXPIRE || '30d',
   });
 };
@@ -16,12 +19,13 @@ exports.login = async (req, res) => {
   const { phone, password } = req.body;
 
   try {
-    if (!phone || !password) {
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone || !password) {
       return res.status(400).json({ success: false, message: 'Please provide phone and password' });
     }
 
     // Check for user
-    const user = await User.findOne({ phone }).select('+password');
+    const user = await User.findOne({ phone: normalizedPhone }).select('+password');
 
     if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -54,7 +58,7 @@ exports.login = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -68,7 +72,7 @@ exports.getMe = async (req, res) => {
       user: req.user,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
 
@@ -79,8 +83,8 @@ exports.changePassword = async (req, res) => {
   const { oldPassword, newPassword } = req.body;
 
   try {
-    if (!oldPassword || !newPassword) {
-      return res.status(400).json({ success: false, message: 'Please provide old and new passwords' });
+    if (!oldPassword || !newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'Please provide the old password and a new password of at least 6 characters' });
     }
 
     // Fetch user with password
@@ -100,6 +104,6 @@ exports.changePassword = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Password updated successfully' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    sendControllerError(res, error);
   }
 };
