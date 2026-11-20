@@ -103,6 +103,10 @@ const MilkCollection = () => {
     setLoading(true);
     setError('');
     setMessage('');
+    setRows([]);
+    setSavedEntries([]);
+    setSuppliers([]);
+    setRowErrors({});
     try {
       const [supplierResult, entryResult] = await Promise.all([
         supplierService.getSuppliers(),
@@ -219,7 +223,7 @@ const MilkCollection = () => {
   };
 
   const handleDateChange = (nextDate) => {
-    if (nextDate === date || !confirmDiscardDrafts()) return;
+    if (!nextDate || nextDate === date || !confirmDiscardDrafts()) return;
     setShowSummary(false);
     setDate(nextDate);
   };
@@ -457,11 +461,11 @@ const MilkCollection = () => {
       <div className="milk-entry-toolbar">
         <label className="milk-entry-date-field">
           <span>Date</span>
-          <input type="date" value={date} onChange={(event) => handleDateChange(event.target.value)} />
+          <input type="date" value={date} disabled={loading || saving} onChange={(event) => handleDateChange(event.target.value)} />
         </label>
         <div className="milk-entry-shift-selector" role="group" aria-label="Milk collection shift">
-          <button type="button" className={shift === 'Morning' ? 'selected' : ''} onClick={() => handleShiftChange('Morning')}>Morning</button>
-          <button type="button" className={shift === 'Evening' ? 'selected' : ''} onClick={() => handleShiftChange('Evening')}>Evening</button>
+          <button type="button" className={shift === 'Morning' ? 'selected' : ''} disabled={loading || saving} onClick={() => handleShiftChange('Morning')}>Morning</button>
+          <button type="button" className={shift === 'Evening' ? 'selected' : ''} disabled={loading || saving} onClick={() => handleShiftChange('Evening')}>Evening</button>
         </div>
       </div>
 
