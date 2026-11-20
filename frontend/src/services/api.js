@@ -59,6 +59,21 @@ export const milkEntryService = {
   bulkAddEntries: async (entries, suppliers = []) => {
     if (!entries.length) return { success: true, count: 0, data: [] };
     const supplierByCode = new Map(suppliers.map((supplier) => [Number(supplier.supplierCode), supplier]));
+    const batchDate = entries[0].date;
+    const batchShift = entries[0].shift;
+    const codes = entries.map((data) => Number(data.supplierCode));
+    if (new Set(codes).size !== codes.length) throw new Error('A supplier appears more than once in this save batch');
+    if (entries.some((data) => data.date !== batchDate || data.shift !== batchShift)) throw new Error('A batch can contain only one date and shift');
+    const existing = await supabase.query('milk_entries', qs([
+      ['select', 'supplier_code'],
+      ['entry_date', `eq.${batchDate}`],
+      ['shift', `eq.${batchShift}`],
+      ['supplier_code', `in.(${codes.join(',')})`],
+    ]));
+    if (existing.length) {
+      const duplicateCodes = [...new Set(existing.map((entry) => Number(entry.supplier_code)))];
+      throw new Error(`Entry already exists for supplier code(s) ${duplicateCodes.join(', ')}. Refresh the date and shift before saving.`);
+    }
     const body = entries.map((data) => {
       const supplier = supplierByCode.get(Number(data.supplierCode));
       const supplierId = supplier?.id || supplier?._id;
