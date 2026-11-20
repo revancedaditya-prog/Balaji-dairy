@@ -170,7 +170,7 @@ const MilkCollection = () => {
     [rows]
   );
   const enteredCount = enteredSupplierCodes.size;
-  const pendingCount = Math.max(suppliers.length - enteredCount, 0);
+  const pendingCount = Math.max(rows.length - enteredCount, 0);
 
   const summaryRows = useMemo(() => savedEntries
     .map((entry) => ({ ...entry, rate: calculateRate(entry.milkQuantity, entry.amount) ?? 0 }))
@@ -180,19 +180,23 @@ const MilkCollection = () => {
   const summary = useMemo(() => {
     const totalMilk = summaryRows.reduce((sum, entry) => sum + Number(entry.milkQuantity || 0), 0);
     const totalAmount = summaryRows.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-    const fatWeighted = summaryRows.reduce((sum, entry) => sum + Number(entry.fat || 0) * Number(entry.milkQuantity || 0), 0);
-    const snfWeighted = summaryRows.reduce((sum, entry) => sum + Number(entry.snf || 0) * Number(entry.milkQuantity || 0), 0);
+    const fatEntries = summaryRows.filter((entry) => Number(entry.fat || 0) > 0);
+    const snfEntries = summaryRows.filter((entry) => Number(entry.snf || 0) > 0);
+    const fatMilkWeight = fatEntries.reduce((sum, entry) => sum + Number(entry.milkQuantity || 0), 0);
+    const snfMilkWeight = snfEntries.reduce((sum, entry) => sum + Number(entry.milkQuantity || 0), 0);
+    const fatWeighted = fatEntries.reduce((sum, entry) => sum + Number(entry.fat || 0) * Number(entry.milkQuantity || 0), 0);
+    const snfWeighted = snfEntries.reduce((sum, entry) => sum + Number(entry.snf || 0) * Number(entry.milkQuantity || 0), 0);
     const enteredSupplierCount = new Set(summaryRows.map((entry) => Number(entry.supplierCode))).size;
     return {
-      totalSuppliers: suppliers.length,
+      totalSuppliers: rows.length,
       enteredSupplierCount,
       totalMilk,
       totalAmount,
       averageRate: totalMilk ? totalAmount / totalMilk : 0,
-      averageFat: totalMilk ? fatWeighted / totalMilk : 0,
-      averageSnf: totalMilk ? snfWeighted / totalMilk : 0,
+      averageFat: fatMilkWeight ? fatWeighted / fatMilkWeight : 0,
+      averageSnf: snfMilkWeight ? snfWeighted / snfMilkWeight : 0,
     };
-  }, [summaryRows, suppliers.length]);
+  }, [summaryRows, rows.length]);
 
   const handleFieldChange = (supplierCode, field, value) => {
     setRows((previous) => previous.map((row) =>
