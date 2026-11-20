@@ -1,579 +1,559 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { milkEntryService, supplierService } from '../../services/api';
-import * as XLSX from 'xlsx';
-import { Card, Button, Input, Badge, Loading, EmptyState } from '../Common/MaterialComponents';
+import {
+  calculateRate,
+  csvEscape,
+  hasMilkEntryInput,
+  isMilkEntryDirty,
+  validateMilkEntryRow,
+} from '../../utils/milkEntryGridUtils';
+import './MilkCollection.css';
+
+const getISTDate = () =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+
+const getDefaultShift = () => {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date()));
+  return hour < 14 ? 'Morning' : 'Evening';
+};
+
+const getISTTime = () =>
+  new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date());
+
+const formatNumber = (value, digits = 2) =>
+  Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+const formatCurrency = (value) =>
+  Number(value || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
+
+const dateLabel = (date) => {
+  if (!date) return '';
+  return new Date(`${date}T00:00:00`).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
+const makeOriginal = (entry) => ({
+  fat: String(Number(entry.fat || 0)),
+  snf: String(Number(entry.snf || 0)),
+  milkQuantity: String(entry.milkQuantity ?? ''),
+  amount: String(entry.amount ?? ''),
+});
+
+const buildRow = (supplier, entry, duplicateCount = 1) => {
+  const original = entry ? makeOriginal(entry) : null;
+  return {
+    supplierCode: Number(supplier.supplierCode),
+    supplierName: supplier.supplierName || entry?.supplierName || 'Unknown Supplier',
+    supplierId: supplier.id || supplier._id || null,
+    entryId: entry?._id || entry?.id || null,
+    original,
+    duplicateCount,
+    fat: entry?.fat ? String(entry.fat) : '',
+    snf: entry?.snf ? String(entry.snf) : '',
+    milkQuantity: entry ? String(entry.milkQuantity ?? '') : '',
+    amount: entry ? String(entry.amount ?? '') : '',
+  };
+};
+
+const rowStatus = (row) => {
+  const dirty = isMilkEntryDirty(row);
+  if (row.duplicateCount > 1) return { label: 'Duplicate records', className: 'duplicate' };
+  if (row.entryId && !dirty) return { label: 'Saved', className: 'saved' };
+  if (row.entryId && dirty) return { label: 'Edited', className: 'edited' };
+  if (!hasMilkEntryInput(row)) return { label: 'Pending', className: 'pending' };
+  return validateMilkEntryRow(row)
+    ? { label: 'Incomplete', className: 'incomplete' }
+    : { label: 'Ready', className: 'ready' };
+};
 
 const MilkCollection = () => {
-  // Form State
-  const [supplierCode, setSupplierCode] = useState('');
-  const [supplierName, setSupplierName] = useState('');
-  const [quantity, setQuantity] = useState('');
-  const [fat, setFat] = useState('');
-  const [snf, setSnf] = useState('');
-  const [amount, setAmount] = useState('');
-  const [remarks, setRemarks] = useState('');
+  const [date, setDate] = useState(getISTDate());
+  const [shift, setShift] = useState(getDefaultShift());
+  const [suppliers, setSuppliers] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [savedEntries, setSavedEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [rowErrors, setRowErrors] = useState({});
+  const [showSummary, setShowSummary] = useState(false);
+  const loadSequence = useRef(0);
 
-  // Time & Shift Detect
-  const getISTDateTime = () => {
-    const d = new Date();
-    // UTC offset for IST is +5.5 hours
-    const localTime = d.getTime() + (d.getTimezoneOffset() * 60000);
-    const istTime = new Date(localTime + (3600000 * 5.5));
-    
-    const dateStr = istTime.toISOString().split('T')[0];
-    const timeStr = istTime.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
-    return { dateStr, timeStr };
-  };
-
-  const detectShift = (timeString) => {
-    const hour = parseInt(timeString.split(':')[0], 10);
-    // Morning shift is typically before 2 PM (14:00)
-    return hour < 14 ? 'Morning' : 'Evening';
-  };
-
-  const initDateTime = getISTDateTime();
-  const [entryDate, setEntryDate] = useState(initDateTime.dateStr);
-  const [entryTime, setEntryTime] = useState(initDateTime.timeStr);
-  const [shift, setShift] = useState(detectShift(initDateTime.timeStr));
-  const [customDateTime, setCustomDateTime] = useState(false);
-
-  // Filters State
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterShift, setFilterShift] = useState('');
-  const [filterCode, setFilterCode] = useState('');
-  const [filterName, setFilterName] = useState('');
-  const [filterVillage, setFilterVillage] = useState('');
-
-  // Data Listing State
-  const [entries, setEntries] = useState([]);
-  const [loadingList, setLoadingList] = useState(true);
-  const [formError, setFormError] = useState('');
-  const [formSuccess, setFormSuccess] = useState('');
-
-  // Live calculated fields
-  const calculatedRate = (quantity && amount) 
-    ? (parseFloat(amount) / parseFloat(quantity)).toFixed(2) 
-    : '0.00';
-
-  // Live Look up on code entry
-  const handleCodeBlur = async () => {
-    if (!supplierCode) return;
-    setFormError('');
+  const loadData = useCallback(async () => {
+    const sequence = ++loadSequence.current;
+    setLoading(true);
+    setError('');
+    setMessage('');
+    setRows([]);
+    setSavedEntries([]);
+    setSuppliers([]);
+    setRowErrors({});
     try {
-      const res = await supplierService.getSuppliers({ search: supplierCode });
-      if (res.success && res.data.length > 0) {
-        // Exact match check
-        const match = res.data.find(s => s.supplierCode === parseInt(supplierCode, 10));
-        if (match) {
-          if (match.status !== 'active') {
-            setFormError(`Supplier #${supplierCode} is INACTIVE`);
-            setSupplierName('');
-          } else {
-            setSupplierName(match.supplierName);
-          }
-        } else {
-          setSupplierName('');
-          setFormError(`Supplier Code #${supplierCode} not registered`);
-        }
-      } else {
-        setSupplierName('');
-        setFormError(`Supplier Code #${supplierCode} not registered`);
-      }
-    } catch (err) {
-      console.error('Supplier lookup error:', err);
-    }
-  };
+      const [supplierResult, entryResult] = await Promise.all([
+        supplierService.getSuppliers(),
+        milkEntryService.getEntries({ startDate: date, endDate: date, shift }),
+      ]);
+      if (sequence !== loadSequence.current) return;
 
-  // Sync date/time if not custom
-  useEffect(() => {
-    if (!customDateTime) {
-      const timer = setInterval(() => {
-        const ist = getISTDateTime();
-        setEntryDate(ist.dateStr);
-        setEntryTime(ist.timeStr);
-        setShift(detectShift(ist.timeStr));
-      }, 30000); // Check every 30s
-      return () => clearInterval(timer);
-    }
-  }, [customDateTime]);
-
-  const loadEntries = async () => {
-    try {
-      setLoadingList(true);
-      const filters = {
-        startDate,
-        endDate,
-        shift: filterShift,
-        supplierCode: filterCode,
-        supplierName: filterName,
-        village: filterVillage
-      };
-      const res = await milkEntryService.getEntries(filters);
-      if (res.success) {
-        setEntries(res.data);
-      }
-    } catch (err) {
-      console.error('Failed to load milk entries:', err);
-    } finally {
-      setLoadingList(false);
-    }
-  };
-
-  useEffect(() => {
-    loadEntries();
-  }, [startDate, endDate, filterCode, filterName, filterShift, filterVillage]);
-
-  // Submit milk collection entry
-  const handleSubmitEntry = async (e) => {
-    e.preventDefault();
-    setFormError('');
-    setFormSuccess('');
-
-    if (!supplierCode || !supplierName || !quantity || !amount) {
-      setFormError('Please enter Supplier Code, Quantity and Amount');
-      return;
-    }
-
-    try {
-      const res = await milkEntryService.addEntry({
-        supplierCode: parseInt(supplierCode, 10),
-        milkQuantity: parseFloat(quantity),
-        fat: fat ? parseFloat(fat) : 0,
-        snf: snf ? parseFloat(snf) : 0,
-        date: entryDate,
-        time: entryTime,
-        shift,
-        amount: parseFloat(amount),
-        remarks,
+      const supplierList = supplierResult?.data || [];
+      const fetchedEntries = [...(entryResult?.data || [])].sort((a, b) =>
+        String(b.time || '').localeCompare(String(a.time || '')) ||
+        String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+      );
+      const duplicateCounts = new Map();
+      fetchedEntries.forEach((entry) => {
+        const code = Number(entry.supplierCode);
+        duplicateCounts.set(code, (duplicateCounts.get(code) || 0) + 1);
       });
 
-      if (res.success) {
-        setFormSuccess(`Entry logged for #${supplierCode} - Qty: ${quantity}L, Amt: ₹${amount}`);
-        // Reset form except Code to facilitate quick consecutive entries for next supplier
-        setQuantity('');
-        setFat('');
-        setSnf('');
-        setAmount('');
-        setRemarks('');
-        loadEntries();
-      }
+      const entriesByCode = new Map();
+      fetchedEntries.forEach((entry) => {
+        const code = Number(entry.supplierCode);
+        if (!entriesByCode.has(code)) entriesByCode.set(code, entry);
+      });
+
+      const mergedSuppliers = [...supplierList];
+      const supplierCodes = new Set(supplierList.map((supplier) => Number(supplier.supplierCode)));
+      fetchedEntries.forEach((entry) => {
+        const code = Number(entry.supplierCode);
+        if (!supplierCodes.has(code)) {
+          supplierCodes.add(code);
+          mergedSuppliers.push({ supplierCode: code, supplierName: entry.supplierName || 'Unknown Supplier' });
+        }
+      });
+
+      mergedSuppliers.sort((a, b) => Number(a.supplierCode) - Number(b.supplierCode));
+      const nextRows = mergedSuppliers.map((supplier) => {
+        const code = Number(supplier.supplierCode);
+        return buildRow(supplier, entriesByCode.get(code), duplicateCounts.get(code) || 1);
+      });
+
+      setSuppliers(supplierList);
+      setSavedEntries(fetchedEntries);
+      setRows(nextRows);
+      setRowErrors({});
     } catch (err) {
-      setFormError(err.response?.data?.message || 'Error occurred while saving entry');
-      console.error(err);
+      if (sequence === loadSequence.current) {
+        setError(err.message || 'Unable to load supplier milk records.');
+      }
+    } finally {
+      if (sequence === loadSequence.current) setLoading(false);
     }
+  }, [date, shift]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const dirtyRows = useMemo(() => rows.filter(isMilkEntryDirty), [rows]);
+  const enteredSupplierCodes = useMemo(
+    () => new Set(rows.filter((row) => row.entryId || hasMilkEntryInput(row)).map((row) => row.supplierCode)),
+    [rows]
+  );
+  const enteredCount = enteredSupplierCodes.size;
+  const pendingCount = Math.max(rows.length - enteredCount, 0);
+
+  const summaryRows = useMemo(() => savedEntries
+    .map((entry) => ({ ...entry, rate: calculateRate(entry.milkQuantity, entry.amount) ?? 0 }))
+    .sort((a, b) => Number(a.supplierCode) - Number(b.supplierCode) || String(a.time || '').localeCompare(String(b.time || ''))),
+  [savedEntries]);
+
+  const summary = useMemo(() => {
+    const totalMilk = summaryRows.reduce((sum, entry) => sum + Number(entry.milkQuantity || 0), 0);
+    const totalAmount = summaryRows.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    const fatEntries = summaryRows.filter((entry) => Number(entry.fat || 0) > 0);
+    const snfEntries = summaryRows.filter((entry) => Number(entry.snf || 0) > 0);
+    const fatMilkWeight = fatEntries.reduce((sum, entry) => sum + Number(entry.milkQuantity || 0), 0);
+    const snfMilkWeight = snfEntries.reduce((sum, entry) => sum + Number(entry.milkQuantity || 0), 0);
+    const fatWeighted = fatEntries.reduce((sum, entry) => sum + Number(entry.fat || 0) * Number(entry.milkQuantity || 0), 0);
+    const snfWeighted = snfEntries.reduce((sum, entry) => sum + Number(entry.snf || 0) * Number(entry.milkQuantity || 0), 0);
+    const enteredSupplierCount = new Set(summaryRows.map((entry) => Number(entry.supplierCode))).size;
+    return {
+      totalSuppliers: rows.length,
+      enteredSupplierCount,
+      totalMilk,
+      totalAmount,
+      averageRate: totalMilk ? totalAmount / totalMilk : 0,
+      averageFat: fatMilkWeight ? fatWeighted / fatMilkWeight : 0,
+      averageSnf: snfMilkWeight ? snfWeighted / snfMilkWeight : 0,
+    };
+  }, [summaryRows, rows.length]);
+
+  const handleFieldChange = (supplierCode, field, value) => {
+    setRows((previous) => previous.map((row) =>
+      row.supplierCode === supplierCode ? { ...row, [field]: value } : row
+    ));
+    setRowErrors((previous) => {
+      if (!previous[supplierCode]) return previous;
+      const next = { ...previous };
+      delete next[supplierCode];
+      return next;
+    });
+    setError('');
+    setMessage('');
   };
 
-  const handleDeleteEntry = async (id, code) => {
-    if (!window.confirm('Delete this milk collection entry record?')) {
+  const handleEnterNavigation = (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const table = event.currentTarget.closest('table');
+    const inputs = Array.from(table?.querySelectorAll('input[data-grid-input]:not([disabled])') || []);
+    const currentIndex = inputs.indexOf(event.currentTarget);
+    if (currentIndex >= 0) inputs[currentIndex + 1]?.focus();
+  };
+
+  const confirmDiscardDrafts = () => {
+    if (!dirtyRows.length) return true;
+    return window.confirm('Discard unsaved changes and change the date or shift?');
+  };
+
+  const handleDateChange = (nextDate) => {
+    if (!nextDate || nextDate === date || !confirmDiscardDrafts()) return;
+    setShowSummary(false);
+    setDate(nextDate);
+  };
+
+  const handleShiftChange = (nextShift) => {
+    if (nextShift === shift || !confirmDiscardDrafts()) return;
+    setShowSummary(false);
+    setShift(nextShift);
+  };
+
+  const saveEntries = async () => {
+    const changedRows = dirtyRows.filter((row) => row.entryId || hasMilkEntryInput(row));
+    if (!changedRows.length) {
+      setMessage('There are no changes to save.');
       return;
     }
+
+    const nextErrors = {};
+    changedRows.forEach((row) => {
+      const validation = validateMilkEntryRow(row);
+      if (validation) nextErrors[row.supplierCode] = validation;
+    });
+    if (Object.keys(nextErrors).length) {
+      setRowErrors(nextErrors);
+      setError('Fix the highlighted rows before saving.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('');
     try {
-      const res = await milkEntryService.deleteEntry(id);
-      if (res.success) {
-        loadEntries();
+      const newRows = changedRows.filter((row) => !row.entryId);
+      const updates = changedRows.filter((row) => row.entryId);
+      if (newRows.length) {
+        const time = getISTTime();
+        await milkEntryService.bulkAddEntries(newRows.map((row) => ({
+          supplierCode: row.supplierCode,
+          supplierName: row.supplierName,
+          date,
+          time,
+          shift,
+          milkQuantity: Number(row.milkQuantity),
+          fat: Number(row.fat || 0),
+          snf: Number(row.snf || 0),
+          amount: Number(row.amount),
+        })), suppliers);
       }
+
+      for (let index = 0; index < updates.length; index += 6) {
+        await Promise.all(updates.slice(index, index + 6).map((row) =>
+          milkEntryService.updateEntry(row.entryId, {
+            date,
+            shift,
+            milkQuantity: Number(row.milkQuantity),
+            fat: Number(row.fat || 0),
+            snf: Number(row.snf || 0),
+            amount: Number(row.amount),
+          })
+        ));
+      }
+
+      await loadData();
+      setMessage(`Saved ${newRows.length} new and updated ${updates.length} existing supplier record(s).`);
     } catch (err) {
-      console.error(err);
+      await loadData();
+      setError(err.message || 'Some entries could not be saved. The table has been refreshed to show saved data');
+    } finally {
+      setSaving(false);
     }
   };
 
-  // Excel Export
-  const exportToExcel = () => {
-    const formattedData = entries.map((e) => ({
-      'Supplier Code': e.supplierCode,
-      'Supplier Name': e.supplierName,
-      'Date': e.date,
-      'Time': e.time,
-      'Shift': e.shift,
-      'Milk Liters': e.milkQuantity,
-      'Fat %': e.fat,
-      'SNF %': e.snf,
-      'Amount (Rs)': e.amount,
-      'Remarks': e.remarks || '-'
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(formattedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Milk_Entries');
-    XLSX.writeFile(workbook, `Milk_Collection_${startDate}_to_${endDate}.xlsx`);
+  const generateSummary = () => {
+    if (dirtyRows.length) {
+      setError('Save all changes before generating the summary.');
+      return;
+    }
+    setError('');
+    setMessage('');
+    setShowSummary(true);
   };
 
-  // PDF Export
-  const exportToPDF = () => {
-    const totalQty = entries.reduce((sum, e) => sum + e.milkQuantity, 0);
-    const totalAmt = entries.reduce((sum, e) => sum + e.amount, 0);
+  const downloadSummary = () => {
+    const csvRows = [
+      ['BALAJI DAIRY'],
+      ['Date', date],
+      ['Shift', shift],
+      ['Total suppliers', summary.totalSuppliers],
+      ['Suppliers entered', summary.enteredSupplierCount],
+      ['Total milk (L)', summary.totalMilk.toFixed(2)],
+      ['Total amount (₹)', summary.totalAmount.toFixed(2)],
+      ['Overall average rate (₹/L)', summary.averageRate.toFixed(2)],
+      ['Average FAT', summary.averageFat.toFixed(2)],
+      ['Average SNF', summary.averageSnf.toFixed(2)],
+      [],
+      ['Supplier Code', 'Supplier Name', 'FAT', 'SNF', 'Milk Quantity (L)', 'Amount (₹)', 'Rate (₹/L)'],
+      ...summaryRows.map((entry) => [
+        entry.supplierCode,
+        entry.supplierName,
+        Number(entry.fat || 0).toFixed(2),
+        Number(entry.snf || 0).toFixed(2),
+        Number(entry.milkQuantity || 0).toFixed(2),
+        Number(entry.amount || 0).toFixed(2),
+        Number(entry.rate || 0).toFixed(2),
+      ]),
+      ['TOTAL', '', summary.averageFat.toFixed(2), summary.averageSnf.toFixed(2), summary.totalMilk.toFixed(2), summary.totalAmount.toFixed(2), summary.averageRate.toFixed(2)],
+    ];
+    const csv = csvRows.map((row) => row.map(csvEscape).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Balaji_Dairy_${date}_${shift}_Summary.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
-    const printContent = `
-      <html>
-        <head>
-          <title>Milk Collection - Balaji Dairy</title>
-          <style>
-            body { font-family: sans-serif; padding: 20px; color: #333; }
-            h2 { text-align: center; color: #1e40af; margin-bottom: 5px; }
-            h4 { text-align: center; font-weight: normal; margin-top: 0; color: #666; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 11px; }
-            th { background-color: #f3f4f6; color: #4b5563; font-weight: bold; border: 1px solid #d1d5db; padding: 6px; text-align: left; }
-            td { border: 1px solid #e5e7eb; padding: 6px; }
-            tr:nth-child(even) { background-color: #f9fafb; }
-            .total-row { font-weight: bold; background-color: #e5e7eb !important; }
-          </style>
-        </head>
-        <body>
-          <h2>BALAJI DAIRY COLLECTION CENTER</h2>
-          <h4>COLLECTION STATEMENT (${startDate} to ${endDate})</h4>
-          <table>
+  const duplicateRecordCount = useMemo(
+    () => rows.reduce((sum, row) => sum + Math.max(row.duplicateCount - 1, 0), 0),
+    [rows]
+  );
+
+  if (showSummary) {
+    return (
+      <section className="milk-summary-screen">
+        <header className="milk-summary-heading">
+          <div className="milk-summary-brand">BALAJI DAIRY</div>
+          <h1>Milk Collection Summary</h1>
+          <p>{dateLabel(date)} <span>•</span> {shift} Shift</p>
+        </header>
+
+        <div className="milk-summary-stats">
+          <div className="milk-summary-stat">
+            <span>Total Suppliers</span>
+            <strong>{summary.totalSuppliers.toLocaleString('en-IN')}</strong>
+          </div>
+          <div className="milk-summary-stat">
+            <span>Suppliers Entered</span>
+            <strong>{summary.enteredSupplierCount.toLocaleString('en-IN')}</strong>
+          </div>
+          <div className="milk-summary-stat">
+            <span>Total Milk</span>
+            <strong>{formatNumber(summary.totalMilk)} L</strong>
+          </div>
+          <div className="milk-summary-stat">
+            <span>Total Amount</span>
+            <strong>{formatCurrency(summary.totalAmount)}</strong>
+          </div>
+          <div className="milk-summary-stat">
+            <span>Average Rate</span>
+            <strong>{formatCurrency(summary.averageRate)} / L</strong>
+          </div>
+          <div className="milk-summary-stat">
+            <span>Weighted FAT / SNF</span>
+            <strong>{formatNumber(summary.averageFat)} / {formatNumber(summary.averageSnf)}</strong>
+          </div>
+        </div>
+
+        {duplicateRecordCount > 0 && (
+          <div className="milk-entry-alert">
+            Found {duplicateRecordCount} duplicate record(s) for the same supplier, date and shift. They are shown separately in this summary and have not been deleted.
+          </div>
+        )}
+
+        <div className="milk-summary-table-wrap">
+          <table className="milk-summary-table">
             <thead>
               <tr>
                 <th>Code</th>
                 <th>Supplier Name</th>
-                <th>Date</th>
-                <th>Shift</th>
-                <th>Qty (L)</th>
-                <th>FAT (%)</th>
-                <th>SNF (%)</th>
+                <th>FAT</th>
+                <th>SNF</th>
+                <th>Milk (L)</th>
                 <th>Amount (₹)</th>
+                <th>Rate (₹/L)</th>
               </tr>
             </thead>
             <tbody>
-              ${entries.map(e => `
-                <tr>
-                  <td><b>#${e.supplierCode}</b></td>
-                  <td>${e.supplierName}</td>
-                  <td>${e.date}</td>
-                  <td>${e.shift}</td>
-                  <td>${e.milkQuantity} L</td>
-                  <td>${e.fat}%</td>
-                  <td>${e.snf}%</td>
-                  <td>₹${e.amount}</td>
+              {summaryRows.map((entry, index) => (
+                <tr key={entry._id || entry.id || `${entry.supplierCode}-${index}`}>
+                  <td>{entry.supplierCode}</td>
+                  <td>{entry.supplierName}</td>
+                  <td>{formatNumber(entry.fat)}</td>
+                  <td>{formatNumber(entry.snf)}</td>
+                  <td>{formatNumber(entry.milkQuantity)}</td>
+                  <td>{formatCurrency(entry.amount)}</td>
+                  <td>{formatNumber(entry.rate)}</td>
                 </tr>
-              `).join('')}
-              <tr class="total-row">
-                <td colspan="4">TOTAL SUMMARY</td>
-                <td>${Math.round(totalQty * 100) / 100} L</td>
-                <td colspan="2">-</td>
-                <td>₹${Math.round(totalAmt * 100) / 100}</td>
-              </tr>
+              ))}
+              {summaryRows.length === 0 && (
+                <tr>
+                  <td colSpan="7" className="milk-summary-empty">No saved entries for this date and shift.</td>
+                </tr>
+              )}
             </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan="2">TOTAL / WEIGHTED AVERAGE</td>
+                <td>{formatNumber(summary.averageFat)}</td>
+                <td>{formatNumber(summary.averageSnf)}</td>
+                <td>{formatNumber(summary.totalMilk)}</td>
+                <td>{formatCurrency(summary.totalAmount)}</td>
+                <td>{formatNumber(summary.averageRate)}</td>
+              </tr>
+            </tfoot>
           </table>
-        </body>
-      </html>
-    `;
+        </div>
 
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
-  };
+        <div className="milk-summary-actions">
+          <button type="button" className="milk-entry-button secondary" onClick={() => window.print()}>Print Summary</button>
+          <button type="button" className="milk-entry-button primary" onClick={downloadSummary}>Download Summary</button>
+          <button type="button" className="milk-entry-button outline" onClick={() => setShowSummary(false)}>Back to Data Entry</button>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <div className="collection-view" style={{ animation: 'fadeIn 250ms ease-in-out' }}>
-      <div className="grid grid-cols-3" style={{ gap: '1rem', alignItems: 'start' }}>
-        {/* Entry Screen (Handheld style) */}
-        <div style={{ gridColumn: 'span 1' }}>
-          <Card style={{ padding: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: '600', marginBottom: '1rem', borderBottom: '1px solid var(--md-sys-color-surface-variant)', paddingBottom: '0.5rem' }}>
-              Collection Desk
-            </h3>
-
-            {formError && <div className="error-alert" style={{ marginBottom: '1rem' }}>{formError}</div>}
-            {formSuccess && <div className="success-alert" style={{ marginBottom: '1rem' }}>{formSuccess}</div>}
-
-            <form onSubmit={handleSubmitEntry}>
-              <Input
-                label="Supplier Code (Press Tab / Blur to look up)*"
-                type="number"
-                inputMode="numeric"
-                placeholder="Farmer numeric code"
-                value={supplierCode}
-                onChange={(e) => {
-                  setSupplierCode(e.target.value);
-                  setSupplierName('');
-                }}
-                onBlur={handleCodeBlur}
-                required
-              />
-
-              <Input
-                label="Supplier Name"
-                type="text"
-                value={supplierName}
-                readOnly
-                placeholder="Farmer name auto-fills"
-                style={{ opacity: 0.85 }}
-              />
-
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <Input
-                  label="Date"
-                  type="date"
-                  value={entryDate}
-                  onChange={(e) => {
-                    setEntryDate(e.target.value);
-                    setCustomDateTime(true);
-                  }}
-                  className="flex-1"
-                />
-                <Input
-                  label="Time"
-                  type="time"
-                  value={entryTime}
-                  onChange={(e) => {
-                    setEntryTime(e.target.value);
-                    setCustomDateTime(true);
-                  }}
-                  className="flex-1"
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-                <div style={{ flex: 1 }}>
-                  <label className="input-md3-label">Shift</label>
-                  <select 
-                    className="input-md3-control" 
-                    value={shift} 
-                    onChange={(e) => {
-                      setShift(e.target.value);
-                      setCustomDateTime(true);
-                    }}
-                  >
-                    <option value="Morning">Morning</option>
-                    <option value="Evening">Evening</option>
-                  </select>
-                </div>
-                {customDateTime && (
-                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                    <Button variant="outlined" onClick={() => setCustomDateTime(false)} style={{ height: '48px', fontSize: '0.75rem', padding: '0 0.5rem' }}>
-                      Auto Live
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <Input
-                  label="Quantity (Liters)*"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  placeholder="e.g. 10.5"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  required
-                  className="flex-1"
-                />
-                <Input
-                  label="Total Amount (₹)*"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  placeholder="e.g. 500"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                  className="flex-1"
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <Input
-                  label="FAT (%)"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  placeholder="e.g. 4.5"
-                  value={fat}
-                  onChange={(e) => setFat(e.target.value)}
-                  className="flex-1"
-                />
-                <Input
-                  label="SNF (%)"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  placeholder="e.g. 8.5"
-                  value={snf}
-                  onChange={(e) => setSnf(e.target.value)}
-                  className="flex-1"
-                />
-              </div>
-
-              {/* Dynamic Rates Display */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '0.75rem 1rem',
-                backgroundColor: 'var(--md-sys-color-primary-container)',
-                color: 'var(--md-sys-color-on-primary-container)',
-                borderRadius: 'var(--md-shape-corner-medium)',
-                fontSize: '0.9rem',
-                fontWeight: '600',
-                marginBottom: '1.25rem'
-              }}>
-                <span>Calculated Rate:</span>
-                <span>₹ {calculatedRate} / Liter</span>
-              </div>
-
-              <Input
-                label="Remarks"
-                type="text"
-                placeholder="Optional notes..."
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-              />
-
-              <Button type="submit" variant="primary" style={{ width: '100%' }}>
-                Save Milk Entry
-              </Button>
-            </form>
-          </Card>
+    <section className="milk-entry-page">
+      <div className="milk-entry-heading">
+        <div>
+          <h1>Milk Data Entry</h1>
+          <p>Enter supplier milk records for the selected date and shift.</p>
         </div>
-
-        {/* Logs Listing */}
-        <div style={{ gridColumn: 'span 2' }}>
-          <Card style={{ padding: '1rem', marginBottom: '1rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.75rem' }}>Filters & Query</h3>
-            
-            <div className="grid grid-cols-3" style={{ gap: '0.75rem' }}>
-              <Input label="Start Date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-              <Input label="End Date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-              <div>
-                <label className="input-md3-label">Shift</label>
-                <select className="input-md3-control" value={filterShift} onChange={(e) => setFilterShift(e.target.value)}>
-                  <option value="">All Shifts</option>
-                  <option value="Morning">Morning</option>
-                  <option value="Evening">Evening</option>
-                </select>
-              </div>
-              <Input label="Farmer Code" type="number" placeholder="Code" value={filterCode} onChange={(e) => setFilterCode(e.target.value)} />
-              <Input label="Farmer Name" type="text" placeholder="Search name" value={filterName} onChange={(e) => setFilterName(e.target.value)} />
-              <Input label="Village" type="text" placeholder="Search village" value={filterVillage} onChange={(e) => setFilterVillage(e.target.value)} />
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
-              <Button variant="outlined" onClick={exportToExcel} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Export Excel</Button>
-              <Button variant="outlined" onClick={exportToPDF} style={{ minHeight: '40px', padding: '0.5rem 1rem' }}>Print PDF</Button>
-            </div>
-          </Card>
-
-          <Card style={{ padding: '1rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem' }}>Milk Collection Log</h3>
-
-            <div className="table-container desktop-only">
-              {loadingList ? (
-                <Loading label="Filtering entries..." />
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Farmer</th>
-                      <th>Date / Time</th>
-                      <th>Shift</th>
-                      <th>Qty</th>
-                      <th>FAT/SNF</th>
-                      <th>Amount</th>
-                      <th style={{ textAlign: 'right' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entries.length > 0 ? (
-                      entries.map((e) => (
-                        <tr key={e._id}>
-                          <td>
-                            <b>#{e.supplierCode}</b>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-                              {e.supplierName}
-                            </div>
-                          </td>
-                          <td>
-                            {e.date}
-                            <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-                              {e.time}
-                            </div>
-                          </td>
-                          <td>
-                            <Badge type={e.shift === 'Morning' ? 'primary' : 'success'}>
-                              {e.shift}
-                            </Badge>
-                          </td>
-                          <td>{e.milkQuantity} L</td>
-                          <td>{e.fat}% / {e.snf}%</td>
-                          <td style={{ fontWeight: '600' }}>₹{e.amount}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <Button
-                              variant="danger"
-                              style={{ padding: '0.2rem 0.5rem', minHeight: '32px', fontSize: '0.75rem' }}
-                              onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
-                            >
-                              Delete
-                            </Button>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)', padding: '2rem' }}>
-                          No milk collection records match the filter query.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Mobile View Card List */}
-            <div className="mobile-card-list mobile-only">
-              {loadingList ? (
-                <Loading label="Filtering entries..." />
-              ) : entries.length > 0 ? (
-                entries.map((e) => (
-                  <div key={e._id} className="mobile-row-card">
-                    <div className="mobile-row-card-header">
-                      <div className="mobile-row-card-title">#{e.supplierCode} - {e.supplierName}</div>
-                      <Badge type={e.shift === 'Morning' ? 'primary' : 'success'}>
-                        {e.shift}
-                      </Badge>
-                    </div>
-                    <div className="mobile-row-card-body">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                        <span>Liters Collected:</span>
-                        <span style={{ fontWeight: '600' }}>{e.milkQuantity} L</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                        <span>FAT / SNF:</span>
-                        <span>{e.fat}% / {e.snf}%</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                        <span>Date / Time:</span>
-                        <span>{e.date} • {e.time}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem', borderTop: '1px dashed var(--md-sys-color-surface-variant)', paddingTop: '0.25rem' }}>
-                        <span style={{ fontWeight: '600' }}>Total Amount:</span>
-                        <span style={{ fontWeight: '700', color: 'var(--md-sys-color-primary)', fontSize: '0.95rem' }}>₹{e.amount}</span>
-                      </div>
-                    </div>
-                    <div className="mobile-row-card-actions">
-                      <Button
-                        variant="danger"
-                        style={{ padding: '0.2rem 0.5rem', minHeight: '36px', fontSize: '0.8rem' }}
-                        onClick={() => handleDeleteEntry(e._id, e.supplierCode)}
-                      >
-                        Delete Entry
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <EmptyState message="No milk collection records match the filter query" />
-              )}
-            </div>
-          </Card>
+        <div className="milk-entry-progress">
+          <strong>{enteredCount} / {suppliers.length}</strong>
+          <span>entered</span>
+          <span className="milk-entry-progress-divider">•</span>
+          <span>{pendingCount} pending</span>
         </div>
       </div>
-    </div>
+
+      <div className="milk-entry-toolbar">
+        <label className="milk-entry-date-field">
+          <span>Date</span>
+          <input type="date" value={date} disabled={loading || saving} onChange={(event) => handleDateChange(event.target.value)} />
+        </label>
+        <div className="milk-entry-shift-selector" role="group" aria-label="Milk collection shift">
+          <button type="button" className={shift === 'Morning' ? 'selected' : ''} disabled={loading || saving} onClick={() => handleShiftChange('Morning')}>Morning</button>
+          <button type="button" className={shift === 'Evening' ? 'selected' : ''} disabled={loading || saving} onClick={() => handleShiftChange('Evening')}>Evening</button>
+        </div>
+      </div>
+
+      {error && <div className="milk-entry-alert error">{error}</div>}
+      {message && <div className="milk-entry-alert success">{message}</div>}
+      {duplicateRecordCount > 0 && (
+        <div className="milk-entry-alert">
+          This date and shift has {duplicateRecordCount} extra duplicate record(s). They are preserved and flagged; check the summary before finalizing.
+        </div>
+      )}
+
+      <div className="milk-entry-table-wrap">
+        {loading ? (
+          <div className="milk-entry-loading">Loading suppliers and saved entries…</div>
+        ) : (
+          <table className="milk-grid-table">
+            <thead>
+              <tr>
+                <th className="supplier-code-cell">Code</th>
+                <th className="supplier-name-cell">Supplier Name</th>
+                <th>FAT</th>
+                <th>SNF</th>
+                <th>Milk (L) <span className="required">*</span></th>
+                <th>Amount (₹) <span className="required">*</span></th>
+                <th>Rate (₹/L)</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const status = rowStatus(row);
+                const rate = calculateRate(row.milkQuantity, row.amount);
+                return (
+                  <tr key={row.supplierCode} className={`milk-grid-row ${status.className}`}>
+                    <td className="supplier-code-cell"><strong>{row.supplierCode}</strong></td>
+                    <td className="supplier-name-cell">{row.supplierName}</td>
+                    {['fat', 'snf', 'milkQuantity', 'amount'].map((field) => (
+                      <td key={field} className={`milk-grid-input-cell ${rowErrors[row.supplierCode] ? 'has-error' : ''}`}>
+                        <input
+                          data-grid-input
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step={field === 'fat' || field === 'snf' ? '0.1' : '0.01'}
+                          value={row[field]}
+                          aria-label={`${row.supplierName} ${field}`}
+                          onChange={(event) => handleFieldChange(row.supplierCode, field, event.target.value)}
+                          onKeyDown={handleEnterNavigation}
+                          disabled={loading || saving}
+                        />
+                      </td>
+                    ))}
+                    <td className="milk-grid-rate">{rate === null ? '—' : formatNumber(rate)}</td>
+                    <td className="milk-grid-status">
+                      <span className={`milk-entry-status ${status.className}`}>{status.label}</span>
+                      {rowErrors[row.supplierCode] && <small className="milk-grid-error">{rowErrors[row.supplierCode]}</small>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!loading && rows.length === 0 && (
+                <tr><td colSpan="8" className="milk-entry-empty">No suppliers found.</td></tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <footer className="milk-entry-footer">
+        <div className="milk-entry-footer-note">
+          <span>Rate is calculated automatically: Amount ÷ Milk Quantity.</span>
+          {dirtyRows.length > 0 && <strong>{dirtyRows.length} unsaved row(s)</strong>}
+        </div>
+        <div className="milk-entry-footer-actions">
+          <button type="button" className="milk-entry-button secondary" onClick={saveEntries} disabled={loading || saving || dirtyRows.length === 0}>
+            {saving ? 'Saving…' : 'Save Entries'}
+          </button>
+          <button type="button" className="milk-entry-button primary" onClick={generateSummary} disabled={loading || saving || dirtyRows.length > 0}>
+            Generate Summary
+          </button>
+        </div>
+        {dirtyRows.length > 0 && <p className="milk-entry-save-hint">Save your changes before generating the summary.</p>}
+      </footer>
+    </section>
   );
 };
 

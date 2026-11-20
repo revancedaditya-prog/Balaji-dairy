@@ -1,0 +1,20 @@
+/* Single-purpose Balaji Dairy milk entry application shell */
+.milk-entry-app { min-height:100vh; background:#fbf8f2; color:#192d3d; }
+.simple-app-header { min-height:68px; display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.7rem 1.2rem; background:#fff; border-bottom:1px solid #e6dfd5; position:sticky; top:0; z-index:20; }
+.simple-app-brand { display:flex; align-items:center; gap:.7rem; }
+.simple-app-brand-mark { width:40px; height:40px; display:grid; place-items:center; background:#102a43; color:#fff; border-radius:11px; font-weight:900; letter-spacing:.04em; font-size:.82rem; }
+.simple-app-brand div { display:flex; flex-direction:column; line-height:1.2; }
+.simple-app-brand strong { color:#102a43; font-size:.9rem; letter-spacing:.05em; }
+.simple-app-brand div span { color:#73808b; font-size:.72rem; margin-top:.2rem; }
+.simple-app-logout { min-height:38px; padding:.45rem .8rem; border:1px solid #ddd4c8; border-radius:10px; background:#fff; color:#102a43; font-weight:800; cursor:pointer; }
+.simple-app-content { width:100%; max-width:1500px; margin:0 auto; padding:1rem; }
+.milk-app-loading { min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1rem; color:#63717c; background:#fbf8f2; }
+.milk-app-spinner { width:34px; height:34px; border:3px solid #e8dfd2; border-top-color:#102a43; border-radius:50%; animation:milk-app-spin .75s linear infinite; }
+@keyframes milk-app-spin { to { transform:rotate(360deg); } }
+@media (max-width:700px) {
+  .simple-app-header { min-height:60px; padding:.55rem .8rem; }
+  .simple-app-brand-mark { width:36px; height:36px; }
+  .simple-app-brand strong { font-size:.8rem; }
+  .simple-app-content { padding:.65rem; }
+}
+@media print { .milk-entry-app { background:#fff !important; } .simple-app-content { max-width:none; margin:0; padding:0; } }

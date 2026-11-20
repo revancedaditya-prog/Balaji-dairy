@@ -4,9 +4,9 @@ const qs = (pairs) => pairs.filter(([,v]) => v !== undefined && v !== null && v 
 const single = (rows) => Array.isArray(rows) ? rows[0] : rows;
 const writeHeaders = { Prefer: 'return=representation' };
 
-const mapProfile = (p) => p ? ({ _id:p.id, id:p.id, name:p.full_name, full_name:p.full_name, phone:p.phone, role:p.role, status:p.status }) : null;
+const mapProfile = (p) => p ? ({ _id:p.id, id:p.id, name:p.name, full_name:p.name, phone:p.phone, email:p.email, role:p.role, status:p.status }) : null;
 const mapSupplier = (s) => ({ _id:s.id, id:s.id, supplierCode:s.supplier_code, supplierName:s.supplier_name, fatherName:s.father_name || '', mobile:s.mobile || '', village:s.village, status:s.status, joiningDate:s.joining_date, createdAt:s.created_at });
-const mapEntry = (e) => ({ _id:e.id, id:e.id, supplierCode:e.supplier_code, supplierName:e.supplier_name, date:e.entry_date, time:String(e.entry_time || '').slice(0,8), shift:e.shift, milkQuantity:Number(e.milk_quantity), fat:Number(e.fat), snf:Number(e.snf), rate:Number(e.rate), amount:Number(e.amount), remarks:e.remarks || '', createdAt:e.created_at });
+const mapEntry = (e) => ({ _id:e.id, id:e.id, supplierCode:e.supplier_code, supplierName:e.supplier_name, date:e.date, time:String(e.time || '').slice(0,8), shift:e.shift, milkQuantity:Number(e.milk_quantity), fat:Number(e.fat), snf:Number(e.snf), rate:Number(e.rate), amount:Number(e.amount), remarks:e.remarks || '', createdAt:e.created_at });
 const mapPayment = (p) => ({ _id:p.id, id:p.id, supplierCode:p.supplier_code, date:p.payment_date, amountPaid:Number(p.amount_paid), paymentMode:p.payment_mode, remarks:p.remarks || '', createdAt:p.created_at });
 
 const todayIST = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -53,10 +53,54 @@ export const supplierService = {
 };
 
 export const milkEntryService = {
-  getEntries: async (filters={}) => { const p=[['select','*'],['order','entry_date.desc,entry_time.desc']]; if(filters.startDate)p.push(['entry_date',`gte.${filters.startDate}`]); if(filters.endDate)p.push(['entry_date',`lte.${filters.endDate}`]); if(filters.shift)p.push(['shift',`eq.${filters.shift}`]); if(filters.supplierCode)p.push(['supplier_code',`eq.${filters.supplierCode}`]); if(filters.supplierName)p.push(['supplier_name',`ilike.*${filters.supplierName}*`]); const rows=await supabase.query('milk_entries',qs(p)); let data=rows.map(mapEntry); if(filters.village){const sups=(await supplierService.getSuppliers({village:filters.village})).data; const set=new Set(sups.map(s=>s.supplierCode)); data=data.filter(e=>set.has(e.supplierCode));} return {success:true,count:data.length,data}; },
+  getEntries: async (filters={}) => { const p=[['select','*'],['order','date.desc,time.desc']]; if(filters.startDate)p.push(['date',`gte.${filters.startDate}`]); if(filters.endDate)p.push(['date',`lte.${filters.endDate}`]); if(filters.shift)p.push(['shift',`eq.${filters.shift}`]); if(filters.supplierCode)p.push(['supplier_code',`eq.${filters.supplierCode}`]); if(filters.supplierName)p.push(['supplier_name',`ilike.*${filters.supplierName}*`]); const rows=await supabase.query('milk_entries',qs(p)); let data=rows.map(mapEntry); if(filters.village){const sups=(await supplierService.getSuppliers({village:filters.village})).data; const set=new Set(sups.map(s=>s.supplierCode)); data=data.filter(e=>set.has(e.supplierCode));} return {success:true,count:data.length,data}; },
   getEntryById: async id => ({success:true,data:mapEntry(single(await supabase.query('milk_entries',qs([['select','*'],['id',`eq.${id}`],['limit','1']]))))}),
-  addEntry: async data => { const s=(await supplierService.getSupplierByCode(data.supplierCode)).data; if(!s)throw new Error('Supplier not found'); const q=Number(data.milkQuantity),a=Number(data.amount); const body={supplier_id:s.id,supplier_code:s.supplierCode,supplier_name:s.supplierName,entry_date:data.date,entry_time:data.time,shift:data.shift,milk_quantity:q,fat:Number(data.fat||0),snf:Number(data.snf||0),rate:q?Number((a/q).toFixed(2)):0,amount:a,remarks:data.remarks||''}; const r=single(await supabase.query('milk_entries','',{method:'POST',headers:writeHeaders,body:JSON.stringify(body)})); return {success:true,data:mapEntry(r)}; },
-  updateEntry: async (id,data) => { const current=(await milkEntryService.getEntryById(id)).data; const q=Number(data.milkQuantity??current.milkQuantity),a=Number(data.amount??current.amount); const body={entry_date:data.date??current.date,entry_time:data.time??current.time,shift:data.shift??current.shift,milk_quantity:q,fat:Number(data.fat??current.fat),snf:Number(data.snf??current.snf),rate:q?Number((a/q).toFixed(2)):0,amount:a,remarks:data.remarks??current.remarks}; const r=single(await supabase.query('milk_entries',qs([['id',`eq.${id}`]]),{method:'PATCH',headers:writeHeaders,body:JSON.stringify(body)})); return {success:true,data:mapEntry(r)}; },
+  addEntry: async data => { const s=(await supplierService.getSupplierByCode(data.supplierCode)).data; if(!s)throw new Error('Supplier not found'); const q=Number(data.milkQuantity),a=Number(data.amount); const body={supplier_code:s.supplierCode,supplier_name:s.supplierName,date:data.date,time:data.time,shift:data.shift,milk_quantity:q,fat:Number(data.fat||0),snf:Number(data.snf||0),rate:q?Number((a/q).toFixed(2)):0,amount:a,remarks:data.remarks||''}; const r=single(await supabase.query('milk_entries','',{method:'POST',headers:writeHeaders,body:JSON.stringify(body)})); return {success:true,data:mapEntry(r)}; },
+  bulkAddEntries: async (entries, suppliers = []) => {
+    if (!entries.length) return { success: true, count: 0, data: [] };
+    const supplierByCode = new Map(suppliers.map((supplier) => [Number(supplier.supplierCode), supplier]));
+    const batchDate = entries[0].date;
+    const batchShift = entries[0].shift;
+    const codes = entries.map((data) => Number(data.supplierCode));
+    if (new Set(codes).size !== codes.length) throw new Error('A supplier appears more than once in this save batch');
+    if (entries.some((data) => data.date !== batchDate || data.shift !== batchShift)) throw new Error('A batch can contain only one date and shift');
+    const existing = await supabase.query('milk_entries', qs([
+      ['select', 'supplier_code'],
+      ['date', `eq.${batchDate}`],
+      ['shift', `eq.${batchShift}`],
+      ['supplier_code', `in.(${codes.join(',')})`],
+    ]));
+    if (existing.length) {
+      const duplicateCodes = [...new Set(existing.map((entry) => Number(entry.supplier_code)))];
+      throw new Error(`Entry already exists for supplier code(s) ${duplicateCodes.join(', ')}. Refresh the date and shift before saving.`);
+    }
+    const body = entries.map((data) => {
+      const supplier = supplierByCode.get(Number(data.supplierCode));
+      if (!supplier) throw new Error(`Supplier #${data.supplierCode} could not be resolved`);
+      const quantity = Number(data.milkQuantity);
+      const amount = Number(data.amount);
+      return {
+        supplier_code: Number(data.supplierCode),
+        supplier_name: data.supplierName || supplier.supplierName,
+        date: data.date,
+        time: data.time,
+        shift: data.shift,
+        milk_quantity: quantity,
+        fat: Number(data.fat || 0),
+        snf: Number(data.snf || 0),
+        rate: quantity ? Number((amount / quantity).toFixed(2)) : 0,
+        amount,
+        remarks: '',
+      };
+    });
+    const inserted = await supabase.query('milk_entries', '', {
+      method: 'POST',
+      headers: writeHeaders,
+      body: JSON.stringify(body),
+    });
+    return { success: true, count: inserted.length, data: inserted.map(mapEntry) };
+  },
+  updateEntry: async (id,data) => { const current=(await milkEntryService.getEntryById(id)).data; const q=Number(data.milkQuantity??current.milkQuantity),a=Number(data.amount??current.amount); const body={date:data.date??current.date,time:data.time??current.time,shift:data.shift??current.shift,milk_quantity:q,fat:Number(data.fat??current.fat),snf:Number(data.snf??current.snf),rate:q?Number((a/q).toFixed(2)):0,amount:a,remarks:data.remarks??current.remarks}; const r=single(await supabase.query('milk_entries',qs([['id',`eq.${id}`]]),{method:'PATCH',headers:writeHeaders,body:JSON.stringify(body)})); return {success:true,data:mapEntry(r)}; },
   deleteEntry: async id => { await supabase.query('milk_entries',qs([['id',`eq.${id}`]]),{method:'DELETE'}); return {success:true}; },
 };
 
