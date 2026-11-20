@@ -56,6 +56,37 @@ export const milkEntryService = {
   getEntries: async (filters={}) => { const p=[['select','*'],['order','entry_date.desc,entry_time.desc']]; if(filters.startDate)p.push(['entry_date',`gte.${filters.startDate}`]); if(filters.endDate)p.push(['entry_date',`lte.${filters.endDate}`]); if(filters.shift)p.push(['shift',`eq.${filters.shift}`]); if(filters.supplierCode)p.push(['supplier_code',`eq.${filters.supplierCode}`]); if(filters.supplierName)p.push(['supplier_name',`ilike.*${filters.supplierName}*`]); const rows=await supabase.query('milk_entries',qs(p)); let data=rows.map(mapEntry); if(filters.village){const sups=(await supplierService.getSuppliers({village:filters.village})).data; const set=new Set(sups.map(s=>s.supplierCode)); data=data.filter(e=>set.has(e.supplierCode));} return {success:true,count:data.length,data}; },
   getEntryById: async id => ({success:true,data:mapEntry(single(await supabase.query('milk_entries',qs([['select','*'],['id',`eq.${id}`],['limit','1']]))))}),
   addEntry: async data => { const s=(await supplierService.getSupplierByCode(data.supplierCode)).data; if(!s)throw new Error('Supplier not found'); const q=Number(data.milkQuantity),a=Number(data.amount); const body={supplier_id:s.id,supplier_code:s.supplierCode,supplier_name:s.supplierName,entry_date:data.date,entry_time:data.time,shift:data.shift,milk_quantity:q,fat:Number(data.fat||0),snf:Number(data.snf||0),rate:q?Number((a/q).toFixed(2)):0,amount:a,remarks:data.remarks||''}; const r=single(await supabase.query('milk_entries','',{method:'POST',headers:writeHeaders,body:JSON.stringify(body)})); return {success:true,data:mapEntry(r)}; },
+  bulkAddEntries: async (entries, suppliers = []) => {
+    if (!entries.length) return { success: true, count: 0, data: [] };
+    const supplierByCode = new Map(suppliers.map((supplier) => [Number(supplier.supplierCode), supplier]));
+    const body = entries.map((data) => {
+      const supplier = supplierByCode.get(Number(data.supplierCode));
+      const supplierId = supplier?.id || supplier?._id;
+      if (!supplierId) throw new Error(`Supplier #${data.supplierCode} could not be resolved`);
+      const quantity = Number(data.milkQuantity);
+      const amount = Number(data.amount);
+      return {
+        supplier_id: supplierId,
+        supplier_code: Number(data.supplierCode),
+        supplier_name: data.supplierName || supplier.supplierName,
+        entry_date: data.date,
+        entry_time: data.time,
+        shift: data.shift,
+        milk_quantity: quantity,
+        fat: Number(data.fat || 0),
+        snf: Number(data.snf || 0),
+        rate: quantity ? Number((amount / quantity).toFixed(2)) : 0,
+        amount,
+        remarks: '',
+      };
+    });
+    const inserted = await supabase.query('milk_entries', '', {
+      method: 'POST',
+      headers: writeHeaders,
+      body: JSON.stringify(body),
+    });
+    return { success: true, count: inserted.length, data: inserted.map(mapEntry) };
+  },
   updateEntry: async (id,data) => { const current=(await milkEntryService.getEntryById(id)).data; const q=Number(data.milkQuantity??current.milkQuantity),a=Number(data.amount??current.amount); const body={entry_date:data.date??current.date,entry_time:data.time??current.time,shift:data.shift??current.shift,milk_quantity:q,fat:Number(data.fat??current.fat),snf:Number(data.snf??current.snf),rate:q?Number((a/q).toFixed(2)):0,amount:a,remarks:data.remarks??current.remarks}; const r=single(await supabase.query('milk_entries',qs([['id',`eq.${id}`]]),{method:'PATCH',headers:writeHeaders,body:JSON.stringify(body)})); return {success:true,data:mapEntry(r)}; },
   deleteEntry: async id => { await supabase.query('milk_entries',qs([['id',`eq.${id}`]]),{method:'DELETE'}); return {success:true}; },
 };
