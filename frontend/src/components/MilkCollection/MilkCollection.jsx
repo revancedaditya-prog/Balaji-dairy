@@ -294,8 +294,9 @@ const MilkCollection = () => {
   }, [ledger, date]);
 
   const balance = Number(ledger?.summary?.pendingAmount || 0);
-  const paymentHistory = (ledger?.history || []).filter((item) => item.txnType === 'credit');
-  const historyRows = showAllHistory ? (ledger?.history || []) : (ledger?.history || []).slice(0, 10);
+  const allHistory = ledger?.history || [];
+  const paymentHistory = allHistory.filter((item) => item.txnType === 'credit');
+  const historyRows = showAllHistory ? allHistory : allHistory.slice(0, 10);
   const rate = Number(entry.milkQuantity) > 0 && entry.amount !== ''
     ? Number(entry.amount) / Number(entry.milkQuantity)
     : null;
@@ -508,7 +509,7 @@ const MilkCollection = () => {
                 <h2>Milk and payment history</h2>
                 <p>Saved transactions for this supplier, newest first.</p>
               </div>
-              {historyRows.length > 10 && (
+              {allHistory.length > 10 && (
                 <button type="button" className="history-toggle" onClick={() => setShowAllHistory((value) => !value)}>
                   {showAllHistory ? 'Show recent' : 'Show all'}
                 </button>
