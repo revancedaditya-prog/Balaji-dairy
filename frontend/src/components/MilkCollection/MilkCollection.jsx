@@ -146,6 +146,7 @@ const MilkCollection = () => {
       setError('Enter a valid numeric supplier code.');
       return;
     }
+    if (!confirmDiscardEntry()) return;
     setError('');
     setMessage('');
     if (code === activeCode) {
