@@ -123,7 +123,7 @@ export const paymentService = {
         fat:e.fat,snf:e.snf,shift:e.shift,rate:e.rate
       })),
       ...pays.data.map(p=>({
-        id:p.id,date:p.date,time:String(p.createdAt||'').slice(11,19),
+        id:p.id,date:p.date,time:p.createdAt?new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(p.createdAt)):'',
         type:'Payment',description:'Paid via '+p.paymentMode+(p.remarks?' - '+p.remarks:''),
         amount:p.amountPaid,txnType:'credit',paymentMode:p.paymentMode,remarks:p.remarks
       }))
