@@ -5,7 +5,7 @@ const single = (rows) => Array.isArray(rows) ? rows[0] : rows;
 const writeHeaders = { Prefer: 'return=representation' };
 
 const mapProfile = (p) => p ? ({ _id:p.id, id:p.id, name:p.name, full_name:p.name, phone:p.phone, email:p.email, role:p.role, status:p.status }) : null;
-const mapSupplier = (s) => ({ _id:s.id, id:s.id, supplierCode:s.supplier_code, supplierName:s.supplier_name, fatherName:s.father_name || '', mobile:s.mobile || '', village:s.village, status:s.status, joiningDate:s.joining_date, createdAt:s.created_at });
+const mapSupplier = (s) => s ? ({ _id:s.id, id:s.id, supplierCode:s.supplier_code, supplierName:s.supplier_name, fatherName:s.father_name || '', mobile:s.mobile || '', village:s.village, status:s.status, joiningDate:s.joining_date, createdAt:s.created_at }) : null;
 const mapEntry = (e) => ({ _id:e.id, id:e.id, supplierCode:e.supplier_code, supplierName:e.supplier_name, date:e.date, time:String(e.time || '').slice(0,8), shift:e.shift, milkQuantity:Number(e.milk_quantity), fat:Number(e.fat), snf:Number(e.snf), rate:Number(e.rate), amount:Number(e.amount), remarks:e.remarks || '', createdAt:e.created_at });
 const mapPayment = (p) => ({ _id:p.id, id:p.id, supplierCode:p.supplier_code, date:p.payment_date, amountPaid:Number(p.amount_paid), paymentMode:p.payment_mode, remarks:p.remarks || '', createdAt:p.created_at });
 
@@ -55,7 +55,7 @@ export const supplierService = {
 export const milkEntryService = {
   getEntries: async (filters={}) => { const p=[['select','*'],['order','date.desc,time.desc']]; if(filters.startDate)p.push(['date',`gte.${filters.startDate}`]); if(filters.endDate)p.push(['date',`lte.${filters.endDate}`]); if(filters.shift)p.push(['shift',`eq.${filters.shift}`]); if(filters.supplierCode)p.push(['supplier_code',`eq.${filters.supplierCode}`]); if(filters.supplierName)p.push(['supplier_name',`ilike.*${filters.supplierName}*`]); const rows=await supabase.query('milk_entries',qs(p)); let data=rows.map(mapEntry); if(filters.village){const sups=(await supplierService.getSuppliers({village:filters.village})).data; const set=new Set(sups.map(s=>s.supplierCode)); data=data.filter(e=>set.has(e.supplierCode));} return {success:true,count:data.length,data}; },
   getEntryById: async id => ({success:true,data:mapEntry(single(await supabase.query('milk_entries',qs([['select','*'],['id',`eq.${id}`],['limit','1']]))))}),
-  addEntry: async data => { const s=(await supplierService.getSupplierByCode(data.supplierCode)).data; if(!s)throw new Error('Supplier not found'); const q=Number(data.milkQuantity),a=Number(data.amount); const body={supplier_code:s.supplierCode,supplier_name:s.supplierName,date:data.date,time:data.time,shift:data.shift,milk_quantity:q,fat:Number(data.fat||0),snf:Number(data.snf||0),rate:q?Number((a/q).toFixed(2)):0,amount:a,remarks:data.remarks||''}; const r=single(await supabase.query('milk_entries','',{method:'POST',headers:writeHeaders,body:JSON.stringify(body)})); return {success:true,data:mapEntry(r)}; },
+  addEntry: async data => { const s=(await supplierService.getSupplierByCode(data.supplierCode)).data; if(!s)throw new Error('Supplier not found'); const q=Number(data.milkQuantity),a=Number(data.amount); const existing=await supabase.query('milk_entries',qs([['select','id'],['supplier_code',`eq.${s.supplierCode}`],['date',`eq.${data.date}`],['shift',`eq.${data.shift}`]])); if(existing.length)throw new Error('A milk entry already exists for this supplier, date and shift. Load it to edit instead.'); const body={supplier_code:s.supplierCode,supplier_name:s.supplierName,date:data.date,time:data.time,shift:data.shift,milk_quantity:q,fat:Number(data.fat||0),snf:Number(data.snf||0),rate:q?Number((a/q).toFixed(2)):0,amount:a,remarks:data.remarks||''}; const r=single(await supabase.query('milk_entries','',{method:'POST',headers:writeHeaders,body:JSON.stringify(body)})); return {success:true,data:mapEntry(r)}; },
   bulkAddEntries: async (entries, suppliers = []) => {
     if (!entries.length) return { success: true, count: 0, data: [] };
     const supplierByCode = new Map(suppliers.map((supplier) => [Number(supplier.supplierCode), supplier]));
@@ -106,9 +106,50 @@ export const milkEntryService = {
 
 export const paymentService = {
   getPayments: async (f={}) => {const p=[['select','*'],['order','payment_date.desc,created_at.desc']]; if(f.supplierCode)p.push(['supplier_code',`eq.${f.supplierCode}`]); if(f.startDate)p.push(['payment_date',`gte.${f.startDate}`]); if(f.endDate)p.push(['payment_date',`lte.${f.endDate}`]); const rows=await supabase.query('payments',qs(p)); return {success:true,count:rows.length,data:rows.map(mapPayment)};},
-  recordPayment: async d => {const s=(await supplierService.getSupplierByCode(d.supplierCode)).data;if(!s)throw new Error('Supplier not found');const body={supplier_id:s.id,supplier_code:s.supplierCode,payment_date:d.date||todayIST(),amount_paid:Number(d.amountPaid),payment_mode:d.paymentMode||'Cash',remarks:d.remarks||''};const r=single(await supabase.query('payments','',{method:'POST',headers:writeHeaders,body:JSON.stringify(body)}));return {success:true,data:mapPayment(r)};},
+  recordPayment: async d => {const s=(await supplierService.getSupplierByCode(d.supplierCode)).data;if(!s)throw new Error('Supplier not found');const currentUser=await supabase.auth.getUser();if(!currentUser?.id)throw new Error('Your session has expired. Please sign in again.');const body={supplier_id:s.id,supplier_code:s.supplierCode,payment_date:d.date||todayIST(),amount_paid:Number(d.amountPaid),payment_mode:d.paymentMode||'Cash',remarks:d.remarks||'',created_by:currentUser.id};const r=single(await supabase.query('payments','',{method:'POST',headers:writeHeaders,body:JSON.stringify(body)}));return {success:true,data:mapPayment(r)};},
   getLedger: async (f={}) => {let rows=await supabase.query('supplier_ledger_summary',qs([['select','*'],['order','supplier_code.asc']]));let data=rows.map(x=>({supplierId:x.supplier_id,supplierCode:x.supplier_code,supplierName:x.supplier_name,mobile:x.mobile,village:x.village,status:x.status,totalMilk:Number(x.total_milk),totalAmount:Number(x.total_amount),totalPaid:Number(x.total_paid),pendingAmount:Number(x.pending_amount)}));if(f.village)data=data.filter(x=>x.village?.toLowerCase().includes(f.village.toLowerCase()));if(f.search){const s=String(f.search).toLowerCase();data=data.filter(x=>String(x.supplierCode)===s||x.supplierName?.toLowerCase().includes(s)||x.village?.toLowerCase().includes(s));}return {success:true,count:data.length,data};},
-  getSupplierLedger: async code => {const supplier=(await supplierService.getSupplierByCode(code)).data;if(!supplier)throw new Error('Supplier not found');const [entries,pays]=await Promise.all([milkEntryService.getEntries({supplierCode:code}),paymentService.getPayments({supplierCode:code})]);const events=[...entries.data.map(e=>({id:e.id,date:e.date,time:e.time,type:'Milk Entry',description:`Qty: ${e.milkQuantity}L | Fat: ${e.fat}% | SNF: ${e.snf}%`,amount:e.amount,txnType:'debit'})),...pays.data.map(p=>({id:p.id,date:p.date,time:String(p.createdAt||'').slice(11,19),type:'Payment',description:`Paid via ${p.paymentMode}${p.remarks?' - '+p.remarks:''}`,amount:p.amountPaid,txnType:'credit'}))].sort((a,b)=>`${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));let bal=0;events.forEach(e=>{bal+=e.txnType==='debit'?e.amount:-e.amount;e.balance=Number(bal.toFixed(2));});const totalMilk=entries.data.reduce((s,e)=>s+e.milkQuantity,0),totalAmount=entries.data.reduce((s,e)=>s+e.amount,0),totalPaid=pays.data.reduce((s,p)=>s+p.amountPaid,0);return {success:true,supplier:{supplierCode:supplier.supplierCode,supplierName:supplier.supplierName,village:supplier.village,mobile:supplier.mobile},summary:{totalMilk,totalAmount,totalPaid,pendingAmount:Number((totalAmount-totalPaid).toFixed(2))},history:events.reverse()};},
+  getSupplierLedger: async code => {
+    const supplier=(await supplierService.getSupplierByCode(code)).data;
+    if(!supplier)throw new Error('Supplier not found');
+    const [entries,pays]=await Promise.all([
+      milkEntryService.getEntries({supplierCode:code}),
+      paymentService.getPayments({supplierCode:code})
+    ]);
+    const events=[
+      ...entries.data.map(e=>({
+        id:e.id,date:e.date,time:e.time,type:'Milk Entry',
+        description:e.shift+' | '+e.milkQuantity+' L | FAT '+e.fat+'% | SNF '+e.snf+'%',
+        amount:e.amount,txnType:'debit',milkQuantity:e.milkQuantity,
+        fat:e.fat,snf:e.snf,shift:e.shift,rate:e.rate
+      })),
+      ...pays.data.map(p=>({
+        id:p.id,date:p.date,time:String(p.createdAt||'').slice(11,19),
+        type:'Payment',description:'Paid via '+p.paymentMode+(p.remarks?' - '+p.remarks:''),
+        amount:p.amountPaid,txnType:'credit',paymentMode:p.paymentMode,remarks:p.remarks
+      }))
+    ].sort((a,b)=>(a.date+' '+a.time).localeCompare(b.date+' '+b.time));
+    let balance=0;
+    events.forEach(e=>{
+      balance+=e.txnType==='debit'?e.amount:-e.amount;
+      e.balance=Number(balance.toFixed(2));
+    });
+    const totalMilk=entries.data.reduce((sum,e)=>sum+e.milkQuantity,0);
+    const totalAmount=entries.data.reduce((sum,e)=>sum+e.amount,0);
+    const totalPaid=pays.data.reduce((sum,p)=>sum+p.amountPaid,0);
+    return {
+      success:true,
+      supplier:{
+        supplierCode:supplier.supplierCode,supplierName:supplier.supplierName,
+        fatherName:supplier.fatherName,mobile:supplier.mobile,village:supplier.village,
+        status:supplier.status
+      },
+      summary:{
+        totalMilk,totalAmount,totalPaid,
+        pendingAmount:Number((totalAmount-totalPaid).toFixed(2))
+      },
+      history:events.reverse()
+    };
+  },
 };
 
 export const reportService = {
