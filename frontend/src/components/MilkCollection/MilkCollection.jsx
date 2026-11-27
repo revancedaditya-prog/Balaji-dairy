@@ -231,14 +231,25 @@ const MilkCollection = () => {
         remarks: entry.remarks || '',
       };
 
+      let savedResult;
       if (currentEntryId) {
-        await milkEntryService.updateEntry(currentEntryId, payload);
+        savedResult = await milkEntryService.updateEntry(currentEntryId, payload);
       } else {
-        await milkEntryService.addEntry(payload);
+        const existing = await milkEntryService.getEntries({ supplierCode: activeCode, startDate: date, endDate: date, shift });
+        if (existing.data.length) {
+          const previous = existing.data.map((item) => `${formatNumber(item.milkQuantity)} L / ${formatCurrency(item.amount)}`).join(', ');
+          const proceed = window.confirm(`A ${shift} entry already exists for this supplier on ${date}: ${previous}.\n\nSave this as an additional entry?`);
+          if (!proceed) { setSavingEntry(false); return; }
+        }
+        savedResult = await milkEntryService.addEntry(payload);
       }
 
       await loadSupplierData();
-      setMessage(currentEntryId ? 'Milk entry updated and saved in Supabase.' : 'Milk entry saved in Supabase.');
+      if (savedResult?.auditLogged === false) {
+        setMessage('Milk entry updated, but its audit record could not be written. Please contact support before making further corrections.');
+      } else {
+        setMessage(currentEntryId ? 'Milk entry updated and saved in Supabase.' : 'Milk entry saved in Supabase.');
+      }
     } catch (err) {
       setError(err.message || 'Unable to save the milk entry.');
     } finally {
@@ -478,6 +489,7 @@ const MilkCollection = () => {
                     <span>Payment mode</span>
                     <select value={payment.paymentMode} onChange={(event) => setPayment((current) => ({ ...current, paymentMode: event.target.value }))}>
                       <option value="Cash">Cash</option>
+                      <option value="UPI">UPI</option>
                       <option value="Bank Transfer">Bank Transfer</option>
                       <option value="Cheque">Cheque</option>
                     </select>
